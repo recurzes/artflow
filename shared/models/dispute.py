@@ -16,7 +16,7 @@ class DisputeStatus(str, enum.Enum):
 
 class Dispute(Base, TimestampMixin):
     __tablename__ = "disputes"
-    __table_args__ = (UniqueConstraint("commission_id", name="uq_dispute_commission"))
+    __table_args__ = (UniqueConstraint("commission_id", name="uq_dispute_commission"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
     commission_id: Mapped[uuid.UUID] = mapped_column(
@@ -51,4 +51,4 @@ class Dispute(Base, TimestampMixin):
         back_populates="disputes_raised",
         foreign_keys=[raised_by]
     )
-    resolved_by: Mapped["User | None"] = relationship(foreign_keys=[resolved_by])
+    resolved_by_user: Mapped["User | None"] = relationship(foreign_keys=[resolved_by])
