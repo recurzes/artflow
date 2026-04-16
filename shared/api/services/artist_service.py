@@ -40,6 +40,20 @@ async def update_artist_status(
     await db.flush()
     return artist
 
+async def update_artist(
+    db: AsyncSession, artist_id: uuid.UUID, data: ArtistUpdate
+) -> Artist | None:
+    result = await db.execute(select(Artist).where(Artist.id == artist_id))
+    artist = result.scalar_one_or_none()
+    if artist is None:
+        return None
+
+    for field, value in data.model_dump(exclude_none=True).items():
+        setattr(artist, field, value)
+
+    await db.flush()
+    return artist
+
 async def get_artist_by_discord_id(
         db: AsyncSession,
         discord_user_id: str,
