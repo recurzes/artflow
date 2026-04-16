@@ -46,7 +46,7 @@ class User(Base, TimestampMixin):
     )
 
     # Relationships
-    artist_profiles: Mapped[list["Artist"]] = relationship(back_populates="user")
+    artist_profiles: Mapped[list["Artist"]] = relationship(back_populates="user", foreign_keys="Artist.user_id")
     commissions_as_client: Mapped[list["Commission"]] = relationship(back_populates="client", foreign_keys="Commission.client_id")
     reviews_given: Mapped[list["Review"]] = relationship(back_populates="reviewer")
     disputes_raised: Mapped[list["Dispute"]] = relationship(

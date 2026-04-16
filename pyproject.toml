@@ -18,7 +18,7 @@ dependencies = [
     "asyncpg>=0.29",
     "alembic>=1.13",
     # Cache
-    "redis[asyncio]>=5.0",
+    "redis>=5.0",
     # Workers
     "celery[redis]>=5.4",
     "Pillow>=10.3",
