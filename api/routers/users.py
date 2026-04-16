@@ -1,10 +1,7 @@
-from datetime import datetime
-
 from fastapi import APIRouter, HTTPException, Query, status
 
 from api.dependencies import BotAuth, DBSession, RedisClient
 from api.services import user_service
-from shared.config import settings
 from shared.schemas.user import UserCreate, UserRead
 
 router = APIRouter(prefix="/users", tags=["users"])
