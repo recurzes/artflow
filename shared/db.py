@@ -8,7 +8,6 @@ from shared.config import settings
 
 
 def _libpq_options_to_server_settings(options: str) -> dict[str, str]:
-    """Turn libpq ``options`` (``-c name=value``) into asyncpg ``server_settings``."""
     if not options or not options.strip():
         return {}
     out: dict[str, str] = {}
@@ -18,7 +17,6 @@ def _libpq_options_to_server_settings(options: str) -> dict[str, str]:
 
 
 def _database_url_and_connect_args(url_str: str) -> tuple[str, dict]:
-    """Remove ``options=`` from the URL; asyncpg does not accept libpq ``options``."""
     url = make_url(url_str)
     connect_args: dict = {}
     if "options" in url.query:
@@ -45,7 +43,7 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
     autoflush=False,
-    auto_commit=False
+    autocommit=False
 )
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
