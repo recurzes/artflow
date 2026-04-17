@@ -1,7 +1,7 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-from os import name
+from typing import Any
 
 import discord
 from discord import app_commands

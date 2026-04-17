@@ -1,11 +1,9 @@
 import logging
 import uuid
-from collections.abc import tuple_iterator
 
 import discord
 from discord import app_commands
 from discord.ext import commands
-from markdown_it.rules_core import inline
 
 from bot.utils.embeds import (
     artist_profile_embed,
@@ -546,4 +544,3 @@ def _build_application_embed(
 async def setup(bot: commands.Bot) -> None:
     cog = ArtistCog(bot)
     await bot.add_cog(cog)
-    bot.tree.add_command(cog.commissions_group)
