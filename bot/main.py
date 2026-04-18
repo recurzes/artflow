@@ -18,6 +18,7 @@ logger = logging.getLogger("artflow.bot")
 
 COGS: list[str] = [
     "bot.events.on_member_join",
+    "bot.events.on_guild_join",
     "bot.cogs.verification",
     "bot.cogs.artist",
     "bot.cogs.commission",
