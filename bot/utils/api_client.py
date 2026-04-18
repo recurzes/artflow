@@ -1,6 +1,7 @@
 from typing import Any
 
 import aiohttp
+from celery.security import key
 from watchfiles import awatch
 
 from shared.config import settings
@@ -20,6 +21,15 @@ class APIClient:
     async def get(self, path: str, **kwargs) -> dict[str, Any]:
         async with self._session.get(
             self._url(path), headers=self._headers, **kwargs
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def get_any(self, path: str, **kwargs) -> Any:
+        async with self._session.get(
+            self._url(path),
+            headers=self._headers,
+                **kwargs
         ) as resp:
             resp.raise_for_status()
             return await resp.json()
