@@ -4,13 +4,14 @@ import discord
 from discord.ext import commands
 
 from bot.utils.embeds import base_embed
+from shared.discord_layout import CHANNEL_RULES_AND_TOS, ROLE_UNVERIFIED
 
 logger = logging.getLogger(__name__)
 
 WELCOME_DM = (
     "Welcome to the server!\n\n"
     "To get started:\n"
-    "1. Head to **#rules-and-tos** and accept the Terms of Service.\n"
+    f"1. Head to **#{CHANNEL_RULES_AND_TOS}** and accept the Terms of Service.\n"
     "2. You'll receive a verification email - click the link to confirm.\n"
     "3. Once verified, you can browse artists and open commissions.\n\n"
     "If you're an artist, run `/artist-apply` after verifying."
@@ -26,7 +27,7 @@ class MemberJoinEvents(commands.Cog):
         await self._send_welcome_dm(member)
 
     async def _assign_unverified_role(self, member: discord.Member) -> None:
-        role = discord.utils.get(member.guild.roles, name="Unverified")
+        role = discord.utils.get(member.guild.roles, name=ROLE_UNVERIFIED)
         if role is None:
             logger.warning(
                 "Unverified role not found in guild %s (%s). Skipping role assignment.",

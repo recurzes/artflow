@@ -48,3 +48,33 @@ class ServerRead(TimestampSchema):
     subscription_tier: SubscriptionTier
     subscription_expires_at: datetime | None
     settings: ServerSettings
+
+class ServerSettingsPatch(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    timezone: str | None = None
+    default_currency: str | None = None
+    nsfw_enabled: bool | None = None
+    max_active_commissions_per_artist: int | None = None
+    commission_expiry_hours: int | None = None
+    channel_verification: str | None = None
+    channel_bot_commands: str | None = None
+    channel_artist_directory: str | None = None
+    channel_verification_queue: str | None = None
+    channel_commissions_open: str | None = None
+    channel_completed_works: str | None = None
+    channel_reviews: str | None = None
+    channel_admin_logs: str | None = None
+    channel_age_check: str | None = None
+    role_unverified: str | None = None
+    role_verified_user: str | None = None
+    role_verified_artist: str | None = None
+    role_18_verified: str | None = None
+    role_moderator: str | None = None
+
+
+class ServerPatch(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str | None = None
+    settings: ServerSettingsPatch | None = None
