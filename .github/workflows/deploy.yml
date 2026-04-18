@@ -49,4 +49,4 @@ jobs:
         run: |
           curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.DOKPLOY_TOKEN }}" \
-            "${{ secrets.DOKPLOY_WEBHOOK_URL_WORKERS }}"
+            "${{ secrets.GITHUB_TOKEN }}"
