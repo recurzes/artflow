@@ -58,7 +58,7 @@ class TOSAcceptButton(discord.ui.View):
         if verified_role and verified_role in member.roles:
             await interaction.followup.send(
                 embed=base_embed("Already Verified", "You are already a verified member."),
-                ephemera=True
+                ephemeral=True
             )
             return
 
