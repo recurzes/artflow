@@ -81,6 +81,22 @@ async def upload_receipt(
     )
     return await get_signed_url(settings.storage_bucket_receipts, key, expires_in=3153600)
 
+async def upload_delivery_file(
+        file_bytes: bytes,
+        filename: str,
+        commission_id: str
+) -> str:
+    ext = PurePosixPath(filename).suffix or ".png"
+    key = f"{commission_id}/final/{uuid.uuid4()}{ext}"
+    await _upload(
+        bucket=settings.storage_bucket_wip,
+        key=key,
+        data=file_bytes,
+        content_type=_content_type(filename),
+        upsert=False
+    )
+    return await get_signed_url(settings.storage_bucket_wip, key, expires_in=604800)
+
 
 # URL Helpers
 async def get_public_url(bucket: str, key: str) -> str:
