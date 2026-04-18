@@ -1,20 +1,39 @@
 from fastapi import APIRouter, HTTPException, status
 
 from api.dependencies import BotAuth, DBSession
-from shared.schemas.server import ServerCreate, ServerRead
+from api.services import server_service
+from shared.models.server import Server
+from shared.schemas.server import (
+    ServerCreate,
+    ServerPatch,
+    ServerRead,
+    ServerSettings,
+    ServerSettingsPatch,
+)
 
 router = APIRouter(prefix="/servers", tags=["servers"])
 
+
+def _server_to_read(server: Server) -> ServerRead:
+    return ServerRead(
+        id=server.id,
+        created_at=server.created_at,
+        updated_at=server.updated_at,
+        discord_guild_id=server.discord_guild_id,
+        name=server.name,
+        subscription_tier=server.subscription_tier,
+        subscription_expires_at=server.subscription_expires_at,
+        settings=ServerSettings.model_validate(server.settings or {}),
+    )
+
 @router.post("", response_model=ServerRead, status_code=status.HTTP_201_CREATED)
-async def create_server(
+async def create_or_update_server(
         body: ServerCreate,
         db: DBSession,
         _auth: BotAuth
 ) -> ServerRead:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Not implemented yet"
-    )
+    server = await server_service.upsert_server(db, body)
+    return _server_to_read(server)
 
 @router.get("/{guild_id}", response_model=ServerRead)
 async def get_server(
@@ -22,18 +41,29 @@ async def get_server(
         db: DBSession,
         _auth: BotAuth
 ) -> ServerRead:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Not implemented yet"
-    )
+    server = await server_service.get_server_by_discord_guild_id(db, guild_id)
+    if server is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
+    return _server_to_read(server)
 
 @router.patch("/{guild_id}/settings", response_model=ServerRead)
-async def update_server_settings(
+async def patch_server(
         guild_id: str,
         db: DBSession,
         _auth: BotAuth
 ) -> ServerRead:
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Not implemented yet"
-    )
+    server = await server_service.patch_server(db, guild_id, body)
+    if server is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
+    return _server_to_read(server)
+
+@router.patch("/{guild_id}/settings", response_model=ServerRead)
+async def patch_server_settings(
+        guild_id: str,
+        db: DBSession,
+        _auth: BotAuth
+) -> ServerRead:
+    server = await server_service.patch_server(db, guild_id, body)
+    if server is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
+    return _server_to_read(server)
