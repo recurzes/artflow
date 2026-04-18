@@ -13,18 +13,19 @@ from bot.utils.embeds import (
     warning_embed
 )
 
+from shared.discord_layout import (
+    CHANNEL_ARTIST_DIRECTORY,
+    CHANNEL_COMMISSIONS_OPEN,
+    CHANNEL_VERIFICATION_QUEUE,
+    ROLE_VERIFIED_ARTIST,
+    SHOWCASE_BY_SLUG
+)
+
 from shared.redis import get_redis
 
 logger = logging.getLogger(__name__)
 
-SHOWCASE_CHANNELS: dict[str, str] = {
-    "anime": "showcase-anime",
-    "chibi": "showcase-chibi",
-    "vtuber": "showcase-vtuber",
-    "portraits": "showcase-portraits",
-    "general": "showcase-general",
-    "nsfw": "nsfw-showcase"
-}
+SHOWCASE_CHANNELS = SHOWCASE_BY_SLUG
 
 REAPPLY_LOCK_TTL = 60 * 60 * 24 * 7
 
@@ -109,7 +110,7 @@ class ArtistApplyModal(discord.ui.Modal, title="ArtFlow — Artist Application")
             "paypal_email": paypal
         }
 
-        queue_channel = discord.utils.get(guild.channels, name="verification-queue")
+        queue_channel = discord.utils.get(guild.channels, name=CHANNEL_VERIFICATION_QUEUE)
         if queue_channel is None:
             logger.warning("verification-queue channel not found in %s", guild.name)
             await interaction.followup.send(
@@ -221,6 +222,24 @@ class ApproveRejectView(discord.ui.View):
 
         try:
             bot = interaction.client
+            server_row = await bot.api.get_or_none(f"/servers/{guild.id}")
+            if server_row is None:
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Server not registered. Re-invite the bot or contact an admin"
+                    ),
+                    ephemeral=True
+                )
+                return
+            server_uuid = server_row.get("id")
+            if not server_uuid:
+                await interaction.followup.send(
+                    embed=error_embed(
+                        "Server not registered. Re-invite the bot or contact an admin"
+                    ),
+                    ephemeral=True
+                )
+                return
             await bot.api.post(
                 "/artists",
                 json={
@@ -247,7 +266,7 @@ class ApproveRejectView(discord.ui.View):
             )
             return
 
-        artist_role = discord.utils.get(guild.roles, name="Verified Artist")
+        artist_role = discord.utils.get(guild.roles, name=ROLE_VERIFIED_ARTIST)
         if artist_role:
             try:
                 await member.add_roles(artist_role, reason="Artist application approved")
@@ -255,7 +274,7 @@ class ApproveRejectView(discord.ui.View):
                 logger.error("Cannot add Verified Artist role to %s", member)
 
         # Post intro embed
-        directory_channel = discord.utils.get(guild.channels, name="artist-directory")
+        directory_channel = discord.utils.get(guild.channels, name=CHANNEL_ARTIST_DIRECTORY)
         if directory_channel:
             price_min = self.application.get("price_min_php")
             price_max = self.application.get("price_max_php")
@@ -444,7 +463,7 @@ class ArtistCog(commands.Cog, name="Artists"):
             return
 
         # Post to #commissions-open channel
-        channel = discord.utils.get(interaction.guild.channels, name="commissions-open")
+        channel = discord.utils.get(interaction.guild.channels, name=CHANNEL_COMMISSIONS_OPEN)
         if channel and open_status:
             embed = base_embed(
                 title=f"{interaction.user.display_name} is OPEN for Commissions!",
