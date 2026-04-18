@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from api.dependencies import BotAuth, DBSession
 from api.services import artist_service
-from shared.schemas.artist import ArtistCreate, ArtistListItem, ArtistRead, ArtistUpdate
+from shared.schemas.artist import ArtistCreate, ArtistListItem, ArtistRead, ArtistUpdate, ArtistCommissionCapacity
 
 router = APIRouter(prefix="/artists", tags=["artists"])
 
@@ -32,6 +32,18 @@ async def create_artist(
 ) -> ArtistRead:
     artist = await artist_service.create_artist(db, body)
     return ArtistRead.model_validate(artist)
+
+@router.get("/{artist_id}/active-commission-count", response_model=ArtistCommissionCapacity)
+async def active_commission_count(
+        artist_id: uuid.UUID,
+        db: DBSession,
+        _auth: BotAuth
+) -> ArtistCommissionCapacity:
+    cap = await artist_service.get_artist_commission_capacity(db, artist_id)
+    if cap is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
+    count, max_commissions = cap
+    return ArtistCommissionCapacity(count=count, max=max_commissions)
 
 @router.patch("/{artist_id}", response_model=ArtistRead)
 async def update_artist(
