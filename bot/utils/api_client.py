@@ -1,6 +1,7 @@
 from typing import Any
 
 import aiohttp
+from watchfiles import awatch
 
 from shared.config import settings
 
@@ -20,6 +21,17 @@ class APIClient:
         async with self._session.get(
             self._url(path), headers=self._headers, **kwargs
         ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+
+    async def get_or_none(self, path: str, **kwargs) -> dict[str, Any] | None:
+        async with self._session.get(
+            self._url(path),
+            headers=self._headers,
+            **kwargs
+        ) as resp:
+            if resp.status == 404:
+                return None
             resp.raise_for_status()
             return await resp.json()
 
