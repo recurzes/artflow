@@ -1,11 +1,15 @@
 import uuid
+from unittest import result
 
-from sqlalchemy import select, cast, String
+from sqlalchemy import select, cast, String, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 
 from shared.models.artist import Artist, ArtistStatus
+from shared.models.commission import Commission, CommissionStatus
 from shared.schemas.artist import ArtistCreate, ArtistUpdate
+
+_TERMINAL_COMMISSION_STATUSES = (CommissionStatus. COMPLETED, CommissionStatus.CANCELLED)
 
 async def create_artist(db: AsyncSession, data: ArtistCreate) -> Artist:
     artist = Artist(
@@ -89,3 +93,31 @@ async def get_artists_for_server(
 
     result = await db.execute(query)
     return list[Artist](result.scalars().all())
+
+async def count_active_commissions_for_artist(
+        db: AsyncSession,
+        artist_id: uuid.UUID
+) -> int:
+    result = await db.execute(
+        select(func.count())
+        .select_from(Commission)
+        .where(
+            Commission.artist_id == artist_id,
+            Commission.status.notin_(_TERMINAL_COMMISSION_STATUSES)
+        )
+    )
+    return int(result.scalar_one() or 0)
+
+async def get_artist_commission_capacity(
+        db: AsyncSession,
+        artist_id: uuid.UUID
+) -> tuple[int, int] | None:
+    result = await db.execute(
+        select(Artist)
+        .where(Artist.id == artist_id)
+    )
+    artist = result.scalar_one_or_none()
+    if artist is None:
+        return None
+    count = await count_active_commissions_for_artist(db, artist_id)
+    return count, artist.max_active_commissions

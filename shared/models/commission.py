@@ -120,6 +120,19 @@ class Commission(Base, TimestampMixin):
         DateTime(timezone=True),
         nullable=True
     )
+    payment_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+    payment_reminder_sent: Mapped[bool] = mapped_column(
+        default=False,
+        nullable=False
+    )
+    delivery_file_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivery_auto_accept_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
 
     # 3% platform fee
     platform_fee_php: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
