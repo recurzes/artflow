@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 import discord
-from watchfiles import awatch
 
 from shared.discord_layout import (
     CATEGORY_CORE,
@@ -26,6 +25,7 @@ from shared.discord_layout import (
     ROLE_VERIFIED_USER,
     SHOWCASE_CHANNEL_NAMES,
 )
+
 
 def _overwrite_bot_send(guild: discord.Guild) -> dict[Any, discord.PermissionOverwrite]:
     me = guild.me

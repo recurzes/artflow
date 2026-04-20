@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from decimal import Decimal
 from typing import Any
 
 import aiohttp
@@ -12,7 +11,6 @@ from discord.ext import commands
 
 from bot.utils.embeds import base_embed, error_embed, success_embed
 from bot.utils.tickets import create_commission_ticket
-from shared.storage import upload_delivery_file, upload_receipt, upload_wip_image
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +166,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
             )
             if not isinstance(artists_raw, list) or not artists_raw:
                 await interaction.followup.send(
-                    embed=error_embed(f"No artists, No active artists on this server yet"),
+                    embed=error_embed("No artists, No active artists on this server yet"),
                     ephemeral=True
                 )
                 return

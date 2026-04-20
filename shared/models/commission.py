@@ -2,11 +2,12 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, Text, ForeignKey
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.models.base import Base, TimestampMixin, uuid_pk
+
 
 class CommissionStatus(str, enum.Enum):
     INQUIRY = "INQUIRY"
@@ -71,6 +72,7 @@ class Commission(Base, TimestampMixin):
         default=False,
         nullable=False
     )
+    client_intake_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Pricing
     quoted_price_php: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)

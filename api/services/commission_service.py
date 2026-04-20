@@ -17,7 +17,7 @@ from shared.schemas.commission import (
     CommissionCreate,
     CommissionStatusUpdate,
     QuoteCreate,
-    WipCreateBody
+    WipCreateBody,
 )
 
 PAYMENT_WINDOW_HOURS = 24

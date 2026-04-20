@@ -4,6 +4,7 @@ from pydantic import EmailStr
 
 from shared.schemas.common import TimestampSchema
 
+
 class UserCreate(TimestampSchema):
     model_config = TimestampSchema.model_config
 

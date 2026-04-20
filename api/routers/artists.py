@@ -4,7 +4,13 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from api.dependencies import BotAuth, DBSession
 from api.services import artist_service
-from shared.schemas.artist import ArtistCreate, ArtistListItem, ArtistRead, ArtistUpdate, ArtistCommissionCapacity
+from shared.schemas.artist import (
+    ArtistCommissionCapacity,
+    ArtistCreate,
+    ArtistListItem,
+    ArtistRead,
+    ArtistUpdate,
+)
 
 router = APIRouter(prefix="/artists", tags=["artists"])
 

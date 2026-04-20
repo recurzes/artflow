@@ -10,17 +10,15 @@ from bot.utils.embeds import (
     base_embed,
     error_embed,
     success_embed,
-    warning_embed
+    warning_embed,
 )
-
 from shared.discord_layout import (
     CHANNEL_ARTIST_DIRECTORY,
     CHANNEL_COMMISSIONS_OPEN,
     CHANNEL_VERIFICATION_QUEUE,
     ROLE_VERIFIED_ARTIST,
-    SHOWCASE_BY_SLUG
+    SHOWCASE_BY_SLUG,
 )
-
 from shared.redis import get_redis
 
 logger = logging.getLogger(__name__)
@@ -190,7 +188,7 @@ class RejectReasonModal(discord.ui.Modal, title="Rejection Reason"):
             pass
 
         await interaction.followup.send(
-            f"Application rejected. Artist notified (if DMs are open).", ephemeral=True
+            "Application rejected. Artist notified (if DMs are open).", ephemeral=True
         )
 
 class ApproveRejectView(discord.ui.View):

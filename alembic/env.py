@@ -3,9 +3,8 @@ from logging.config import fileConfig
 
 from sqlalchemy.engine import Connection
 
-from alembic import context
-
 import shared.models
+from alembic import context
 from shared.db import engine
 
 # this is the Alembic Config object, which provides

@@ -3,10 +3,11 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.models.base import Base, TimestampMixin, uuid_pk
+
 
 class SubscriptionTier(str, enum.Enum):
     FREE = "FREE"

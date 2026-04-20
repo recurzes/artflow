@@ -1,10 +1,9 @@
 from typing import Any
 
 import aiohttp
-from celery.security import key
-from watchfiles import awatch
 
 from shared.config import settings
+
 
 class APIClient:
     def __init__(self, session: aiohttp.ClientSession) -> None:

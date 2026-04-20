@@ -2,9 +2,7 @@ import mimetypes
 import uuid
 from pathlib import PurePosixPath
 
-from _testcapi import awaitType
 from supabase import AsyncClient, acreate_client
-
 
 from shared.config import settings
 

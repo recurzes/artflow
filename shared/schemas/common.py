@@ -3,6 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+
 class UUIDSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

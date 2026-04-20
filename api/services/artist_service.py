@@ -1,9 +1,8 @@
 import uuid
-from unittest import result
 
-from sqlalchemy import select, cast, String, func
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.models.artist import Artist, ArtistStatus
 from shared.models.commission import Commission, CommissionStatus

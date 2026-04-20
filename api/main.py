@@ -8,6 +8,7 @@ from shared.db import engine
 from shared.redis import close_pool, get_pool
 from shared.storage import close_client as close_storage_client
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_pool()
