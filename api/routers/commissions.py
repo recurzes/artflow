@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, HTTPException, status, Query
-from sqlalchemy.sql.annotation import Annotated
+from typing import Annotated
 
 from api.dependencies import BotAuth, DBSession
 from api.services import commission_service
