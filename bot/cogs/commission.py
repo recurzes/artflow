@@ -343,12 +343,23 @@ class ArtistPickView(discord.ui.View):
             bot: commands.Bot,
             server_uuid: str,
             artists: list[dict[str, Any]],
-            client_user: discord.Member
+            client_user: discord.Member,
+            page: int = 0
     ) -> None:
-        super().__init__(timeout=3600)
+        super().__init__(timeout=300)
         self.bot = bot
         self.server_uuid = server_uuid
+        self._all = artists
         self.artists = {a["id"]: a for a in artists}
+        self._page = page
+        self._client_user = client_user
+
+        n = len(artists)
+        max_page = max(0, (n - 1) // PAGE_SIZE)
+        self._page = min(page, max_page)
+        start = self._page * PAGE_SIZE
+        page_artists = artists[start : start + PAGE_SIZE]
+
         options = [
             discord.SelectOption(
                 label=a["display_name"][:100],
@@ -357,10 +368,55 @@ class ArtistPickView(discord.ui.View):
             )
             for a in artists[:25]
         ]
+
         self.select = discord.ui.Select(placeholder="Choose an artist...", options=options)
         self.select.callback = self._on_select
         self.add_item(self.select)
-        self._client_user = client_user
+
+        self.prev_btn = discord.ui.button(
+            label="Previous",
+            style=discord.ButtonStyle.secondary,
+            disabled=self._page <= 0
+        )
+        self.prev_btn.callback = self._prev_page
+        self.add_item(self.prev_btn)
+
+
+    async def _prev_page(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self._client_user.id:
+            await interaction.response.send_message(
+                "Only the person who started this request can paginate",
+                ephemeral=True
+            )
+            return
+        await interaction.response.edit_message(
+            view=ArtistPickView(
+                bot=self.bot,
+                server_uuid=self.server_uuid,
+                artists=self._all,
+                client_user=self._client_user,
+                page=self._page - 1
+            )
+        )
+
+
+    async def _next_page(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self._client_user.id:
+            await interaction.response.send_message(
+                "Only the person who started this request can paginate",
+                ephemeral=True
+            )
+            return
+        await interaction.response.edit_message(
+            view=ArtistPickView(
+                bot=self.bot,
+                server_uuid=self.server_uuid,
+                artists=self._all,
+                client_user=self._client_user,
+                page=self._page + 1
+            )
+        )
+
 
     async def _on_select(self, interaction: discord.Interaction) -> None:
         if interaction.user.id != self._client_user.id:
@@ -428,11 +484,13 @@ class ArtistPickView(discord.ui.View):
                     description=(
                         f"Client: {interaction.user.mention}\n"
                         f"Artist: {artist_member.mention}\n\n"
-                        f"Artist: use `/quote` with your price. "
-                        f"Client: use `/accept-quote` after the artist sends a quote, "
-                        f"then `/confirm-tos` when ready to pay"
-                    )
-                )
+                        "**Client:** use **Submit commission brief** below, then the artist can "
+                        "`/quote`.\n"
+                        "After a quote: use **Accept quote** / **Counter offer** on the quote "
+                        "message, then **Accept TOS** (or `/confirm-tos`), then `/pay`."
+                    ),
+                ),
+                view=IntakeOpenView(self.bot, str(comm_id), interaction.user.id)
             )
             await interaction.followup.send(
                 embed=success_embed(
@@ -465,7 +523,16 @@ class CommissionCog(commands.Cog, name="Commissions"):
         name="commission",
         description="Start a new commission request (choose an artist)",
     )
-    async def commission_request(self, interaction: discord.Interaction) -> None:
+    @app_commands.describe(
+        nsfw_only="Show only artists who accept NSFW",
+        style="Filter by style (substring match)"
+    )
+    async def commission_request(
+            self,
+            interaction: discord.InteractionMessage,
+            nsfw_only: bool = False,
+            style: str | None = None
+    ) -> None:
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         if guild is None:
@@ -478,13 +545,19 @@ class CommissionCog(commands.Cog, name="Commissions"):
         try:
             server = await self.bot.api.get(f"/servers/{guild.id}")
             server_uuid = server["id"]
+            params: list[tuple[str, str]] = [("server_id", str(server_uuid))]
+            if nsfw_only:
+                params.append(("nsfw_only", "true"))
+            if style and style.strip():
+                params.append(("styles", style.strip()))
+
             artists_raw = await self.bot.api.get_any(
                 "/artists",
-                params={"server_id": str(server_uuid)}
+                params=params
             )
             if not isinstance(artists_raw, list) or not artists_raw:
                 await interaction.followup.send(
-                    embed=error_embed("No artists, No active artists on this server yet"),
+                    embed=error_embed("No artists, No active artists match these filters"),
                     ephemeral=True
                 )
                 return
@@ -495,10 +568,13 @@ class CommissionCog(commands.Cog, name="Commissions"):
                 artists=artists_raw,
                 client_user=interaction.user
             )
+            desc = "Select an artist below. Use Previous/Next if there are many"
+            if nsfw_only or (style and style.strip()):
+                desc += " Filters are applied"
             await interaction.followup.send(
                 embed=base_embed(
                     title="Open a commission",
-                    description="Select an artist below. A private ticket channel will be created"
+                    description=desc
                 ),
                 view=view,
                 ephemeral=True
