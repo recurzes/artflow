@@ -1,5 +1,3 @@
-from shared.schemas.common import TimestampSchema, UUIDSchema
-from shared.schemas.user import UserCreate, UserRead
 from shared.schemas.artist import ArtistCreate, ArtistListItem, ArtistRead, ArtistUpdate
 from shared.schemas.commission import (
     CommissionCreate,
@@ -7,7 +5,9 @@ from shared.schemas.commission import (
     CommissionStatusUpdate,
     QuoteCreate,
 )
+from shared.schemas.common import TimestampSchema, UUIDSchema
 from shared.schemas.server import ServerCreate, ServerRead, ServerSettings
+from shared.schemas.user import UserCreate, UserRead
 
 __all__ = [
     "TimestampSchema",

@@ -1,11 +1,11 @@
+from shared.models.artist import Artist, ArtistStatus
 from shared.models.base import Base
+from shared.models.commission import Commission, CommissionStatus, CurrencyUsed, PaymentMethod
+from shared.models.dispute import Dispute, DisputeStatus
+from shared.models.review import Review
 from shared.models.server import Server, SubscriptionTier
 from shared.models.user import User
-from shared.models.artist import Artist, ArtistStatus
-from shared.models.commission import Commission, CommissionStatus, PaymentMethod, CurrencyUsed
 from shared.models.wip_update import WipUpdate
-from shared.models.review import Review
-from shared.models.dispute import Dispute, DisputeStatus
 
 __all__ = [
     "Base",
