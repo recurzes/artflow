@@ -10,7 +10,9 @@ from shared.schemas.commission import (
     CommissionCreate,
     CommissionRead,
     CommissionStatusUpdate,
+    CounterOfferBody,
     DeliverySubmitBody,
+    IntakeSubmitBody,
     QuoteCreate,
     ReceiptUploadBody,
     TosAcceptBody,
@@ -76,6 +78,36 @@ async def update_commission_status(
 ) -> CommissionRead:
     try:
         comm = await commission_service.transition_status(db, commission_id, body)
+        return CommissionRead.model_validate(comm)
+    except ValueError as e:
+        raise _bad_request(e) from e
+
+@router.post("/{commission_id}/intake", response_model=CommissionRead)
+async def submit_intake(
+        commission_id: uuid.UUID,
+        body: IntakeSubmitBody,
+        db: DBSession,
+        _auth: BotAuth
+) -> CommissionRead:
+    try:
+        comm = await commission_service.submit_intake(db, commission_id, body.notes)
+        return CommissionRead.model_validate(comm)
+    except ValueError as e:
+        raise _bad_request(e) from e
+
+@router.post("/{commission_id}/counter-offer", response_model=CommissionRead)
+async def counter_offer(
+        commission_id: uuid.UUID,
+        body: CounterOfferBody,
+        db: DBSession,
+        _auth: BotAuth
+) -> CommissionRead:
+    try:
+        comm = await commission_service.request_counter_offer(
+            db,
+            commission_id,
+            notes=body.notes
+        )
         return CommissionRead.model_validate(comm)
     except ValueError as e:
         raise _bad_request(e) from e

@@ -119,6 +119,44 @@ async def transition_status(
     return comm
 
 
+async def submit_intake(
+        db: AsyncSession,
+        commission_id: uuid.UUID,
+        notes: str
+) -> Commission:
+    comm = await get_commission(db, commission_id)
+    if comm is None:
+        raise ValueError("Commission not found")
+    if comm.status != CommissionStatus.INTAKE:
+        raise ValueError("Intake can only be submitted while commission is in INTAKE status")
+    comm.client_intake_notes = notes
+    await db.flush()
+    return comm
+
+
+async def request_counter_offer(
+        db: AsyncSession,
+        commission_id: uuid.UUID,
+        notes: str = ""
+) -> Commission:
+    comm = await get_commission(db, commission_id)
+    if comm is None:
+        raise ValueError("Commission not found")
+    if comm.status != CommissionStatus.QUOTED:
+        raise ValueError("Counter-offer is only valid while commission is QUOTED")
+
+    if not _can_transition(comm.status, CommissionStatus.INTAKE):
+        raise ValueError("Cannot return to INTAKE from current status")
+
+    comm.quoted_price_php = None
+    comm.quoted_price_usd = None
+    comm.currency_used = None
+    comm.deadline_at = None
+    comm.status = CommissionStatus.INTAKE
+    await db.flush()
+    return comm
+
+
 async def apply_quote(
         db: AsyncSession,
         commission_id: uuid.UUID,
