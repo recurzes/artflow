@@ -5,7 +5,7 @@ from sqlalchemy.sql.annotation import Annotated
 
 from api.dependencies import BotAuth, DBSession
 from api.services import commission_service
-from schemas.commission import DeliverySubmitBody
+from shared.schemas.commission import DeliverySubmitBody
 from shared.models.commission import PaymentMethod
 from shared.schemas.commission import (
     CommissionCreate,
