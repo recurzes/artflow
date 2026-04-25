@@ -1,6 +1,7 @@
 import logging
 import uuid
 
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -82,7 +83,11 @@ class ArtistApplyModal(discord.ui.Modal, title="ArtFlow — Artist Application")
         finally:
             await redis.aclose()
 
-        social_lines = [l.strip() for l in self.social_links.value.splitlines() if l.strip()]
+        social_lines = [
+            l.strip()
+            for l in self.social_links.value.splitlines()
+            if l.strip()
+        ]
         if len(social_lines) < 2:
             await interaction.followup.send(
                 embed=error_embed("Please provide at least 2 social links (one per line)"),
@@ -430,6 +435,69 @@ class ArtistCog(commands.Cog, name="Artists"):
             ephemeral=True
         )
 
+    settings_group = app_commands.Group(
+        name="settings",
+        description="Update your artist profile, TOS, and payment infor"
+    )
+
+    @settings_group.command(
+        name="tos",
+        description="Set or update your commission Terms of Service text"
+    )
+    @app_commands.describe(text="Full TOS text shown to clients before payment")
+    async def settings_tos(self, interaction: discord.Interaction, text: str) -> None:
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send(
+                embed=error_embed("Use this command in a server"),
+                ephemeral=True
+            )
+            return
+        try:
+            server = await self.bot.api.get(f"/servers/{guild.id}")
+            artists_raw = await self.bot.api.get_any(
+                "/artists",
+                params={"server_id": server["id"]}
+            )
+        except aiohttp.ClientResponseError as exc:
+            await interaction.followup.send(
+                embed=error_embed(f"API error: {str(exc.message)}"),
+                ephemeral=True
+            )
+            return
+
+        if not isinstance(artists_raw, list):
+            await interaction.followup.send(
+                embed=error_embed("Invalid response from API"),
+                ephemeral=True
+            )
+            return
+        me = str(interaction.user.id)
+        artist_row = next(
+            (a for a in artists_raw if a.get("discord_user_id") == me),
+            None
+        )
+        if artist_row is None:
+            await interaction.followup.send(
+                embed=error_embed(
+                    "Not an artist, You are not registered artist on this server",
+                ),
+                ephemeral=True
+            )
+            return
+        await self.bot.api.patch(
+            f"/artists/{artist_row['id']}",
+            json={"tos_text": text}
+        )
+        await interaction.followup.send(
+            embed=success_embed(
+                "TOS saved",
+                "Clients will use `/confirm-tos` in the ticket with this text"
+            ),
+            ephemeral=True
+        )
+
     commissions_group = app_commands.Group(
         name="commissions",
         description="Manage your commission availability."
@@ -445,9 +513,6 @@ class ArtistCog(commands.Cog, name="Artists"):
 
 
     async def _set_commission_status(self, interaction: discord.Interaction, open_status: bool) -> None:
-        from shared.models.artist import ArtistStatus
-
-        new_status = ArtistStatus.ACTIVE if open_status else ArtistStatus.INACTIVE
         status_label = "OPEN" if open_status else "CLOSED"
 
         try:
@@ -517,7 +582,6 @@ def _build_application_embed(
         "REJECTED": discord.Color.red()
     }
 
-    display = member.display_name if isinstance(member, discord.Member) else str(member)
     avatar_url = member.display_avatar.url if isinstance(member, discord.Member) else None
 
     embed = discord.Embed(
@@ -561,3 +625,5 @@ def _build_application_embed(
 async def setup(bot: commands.Bot) -> None:
     cog = ArtistCog(bot)
     await bot.add_cog(cog)
+    bot.tree.add_command(cog.settings_group)
+    bot.tree.add_command(cog.commissions_group)
