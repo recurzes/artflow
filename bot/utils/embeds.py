@@ -1,3 +1,5 @@
+from os.path import devnull
+
 import discord
 
 # Brand Color Constants
@@ -55,3 +57,61 @@ def artist_profile_embed(
         embed.set_image(url=portfolio_images[0])
 
     return embed
+
+def payment_instructions_embed(
+        *,
+        artist_display_name: str,
+        quoted_price_php: float | None,
+        payment_deadline_display: str | None,
+        gcash_number: str | None,
+        paypal_email: str | None
+) -> discord.Embed:
+    embed = base_embed(
+        title="Payment instructions",
+        description=(
+            f"Pay **{artist_display_name}** for this commission. "
+            "Upload your receipt with `/pay` when done"
+        ),
+        color=COLOR_WARNING
+    )
+    if quoted_price_php is not None:
+        embed.add_field(name="Amount due", value=f"₱{quoted_price_php:,.2f} PHP", inline=True)
+    if payment_deadline_display:
+        embed.add_field(name="Pay by", value=payment_deadline_display, inline=True)
+    gcash = gcash_number or ""
+    paypal = paypal_email or ""
+    embed.add_field(name="GCash number", value=gcash, inline=True)
+    embed.add_field(name="PayPal", value=paypal, inline=True)
+
+def public_review_embed(
+        *,
+        artst_name: str,
+        rating: int,
+        body: str | None
+) -> discord.Embed:
+    stars = "⭐" * rating
+    desc = f"{stars} ({rating}/5)"
+    if body:
+        desc += f"\n\n{body}"
+    return base_embed(f"Review — {artst_name}", desc, color=COLOR_SUCCESS)
+
+def completed_work_embed(
+        *,
+        artist_name: str,
+        commission_id_display: str,
+        delivery_file_url: str | None
+) -> discord.Embed:
+    embed = base_embed(
+        title="Completed work",
+        description=f"Artist: **{artist_name}**\nCommission: `{commission_id_display}`",
+        color=COLOR_SUCCESS
+    )
+    if delivery_file_url and _looks_like_image_url(delivery_file_url):
+        embed.set_image(url=delivery_file_url)
+    elif delivery_file_url:
+        embed.add_field(name="File", value=delivery_file_url, inline=False)
+    return embed
+
+def _looks_like_image_url(url: str) -> bool:
+    lower = url.split("?", maxsplit=1)[0].lower()
+    return lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))

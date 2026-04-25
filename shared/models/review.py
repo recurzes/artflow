@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.models.base import Base, TimestampMixin, uuid_pk
 
+
 class Review(Base, TimestampMixin):
     __tablename__ = "reviews"
     __table_args__ = (

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from shared.models.server import Server
 from shared.schemas.server import ServerCreate, ServerPatch, ServerSettings, ServerSettingsPatch
 
+
 async def get_server_by_discord_guild_id(
         db: AsyncSession,
         discord_guild_id: str

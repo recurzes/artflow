@@ -5,10 +5,8 @@ from api.services import server_service
 from shared.models.server import Server
 from shared.schemas.server import (
     ServerCreate,
-    ServerPatch,
     ServerRead,
     ServerSettings,
-    ServerSettingsPatch,
 )
 
 router = APIRouter(prefix="/servers", tags=["servers"])

@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+
 class AdminGroup(app_commands.Group, name="admin", description="Admin management commands"):
     def __init__(self) -> None:
         super().__init__()

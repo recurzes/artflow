@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import discord
-
 import re
 
+import discord
+
 from shared.discord_layout import CATEGORY_CORE, ROLE_MODERATOR
+
 
 def _safe_channel_slug(label: str) -> str:
     s = re.sub(r"[^a-z0-9\-]", "-", label.lower())[:90]

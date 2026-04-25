@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.models.user import User
 
+
 async def upsert_user(
         db: AsyncSession,
         *,

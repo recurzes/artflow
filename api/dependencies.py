@@ -5,7 +5,7 @@ from fastapi import Depends, Header, HTTPException, status
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.config import Settings, settings
+from shared.config import settings
 from shared.db import get_db as _get_db
 from shared.redis import get_redis as _get_redis
 

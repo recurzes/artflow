@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from shared.models.commission import CommissionStatus, CurrencyUsed, PaymentMethod
 from shared.schemas.common import TimestampSchema
@@ -60,6 +60,16 @@ class WipCreateBody(BaseModel):
     artist_note: str | None = None
 
 
+class IntakeSubmitBody(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    notes: str = Field(min_length=1, max_length=12000)
+
+
+class CounterOfferBody(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    notes: str = ""
+
+
 class CommissionRead(TimestampSchema):
     server_id: uuid.UUID
     artist_id: uuid.UUID
@@ -68,6 +78,7 @@ class CommissionRead(TimestampSchema):
     status: CommissionStatus
     commission_type: str | None
     is_nsfw: bool
+    client_intake_notes: str | None
     quoted_price_php: Decimal | None
     quoted_price_usd: Decimal | None
     currency_used: CurrencyUsed | None
