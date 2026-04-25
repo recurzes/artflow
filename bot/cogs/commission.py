@@ -1038,6 +1038,56 @@ class CommissionCog(commands.Cog, name="Commissions"):
             await interaction.followup.send(embed=error_embed(f"Failed: {str(exc.message)}"))
 
     @app_commands.command(
+        name="review",
+        description="[Client] Leave a star review after completion"
+    )
+    @app_commands.describe(rating="1-5 stars", comment="Optional written review")
+    async def review_cmd(
+            self,
+            interaction: discord.Interaction,
+            rating: app_commands.Range[int, 1, 5],
+            comment: str = ""
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
+            return
+        try:
+            comm = await self.bot.api.get(
+                f"/commissions/by-discord-channel/{interaction.channel.id}"
+            )
+            client = await self.bot.api.get(f"/users/{interaction.user.id}")
+            if client["id"] != comm["client_id"]:
+                await interaction.followup.send(embed=error_embed("Only the client can review"))
+                return
+            await self.bot.api.post(
+                f"/commissions/{comm['id']}/review",
+                json={
+                    "reviewer_id": client["id"],
+                    "rating": rating,
+                    "body": comment or None,
+                    "is_public": True
+                }
+            )
+            artist = await self.bot.api.get(f"/artists/{comm['artist_id']}")
+            server = await self.bot.api.get(f"/servers/{interaction.guild.id}")
+            settings = server.get("settings") or {}
+            if isinstance(settings, dict):
+                await _maybe_post_completed_works(
+                    interaction.guild,
+                    settings,
+                    artist.get("display_name", "Artist"),
+                    rating,
+                    comment or None
+                )
+            await interaction.followup.send(
+                embed=success_embed("Thank you for your review!"),
+                ephemeral=True
+            )
+        except aiohttp.ClientResponseError as exc:
+            await interaction.followup.send(embed=error_embed(f"Failed: {str(exc.message)}"))
+
+    @app_commands.command(
         name="revision",
         description="Request a revision on the current work-in-progress"
     )
