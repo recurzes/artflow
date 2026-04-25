@@ -177,7 +177,7 @@ async def confirm_payment(
         raise _bad_request(e) from e
 
 @router.post("/{commission_id}/wip-update", response_model=CommissionRead)
-async def deliver(
+async def wip_update(
         commission_id: uuid.UUID,
         body: WipCreateBody,
         db: DBSession,
