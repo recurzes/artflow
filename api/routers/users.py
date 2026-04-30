@@ -1,16 +1,19 @@
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
-from api.dependencies import BotAuth, DBSession, RedisClient
+from api.dependencies import BotAuth, DBSession, RedisClient, limiter
 from api.services import user_service
 from shared.schemas.user import UserCreate, UserRead
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+
 @router.post("", response_model=UserRead, status_code=status.HTTP_200_OK)
+@limiter.limit("10/minute")
 async def upsert_user(
+        request: Request,
         body: UserCreate,
         db: DBSession,
-        _auth: BotAuth
+        _auth: BotAuth,
 ) -> UserRead:
     user = await user_service.upsert_user(
         db,
@@ -20,8 +23,11 @@ async def upsert_user(
     )
     return UserRead.model_validate(user)
 
+
 @router.get("/verify-email", status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
 async def verify_email(
+        request: Request,
         db: DBSession,
         redis: RedisClient,
         token: str = Query(..., description="Email verification token from DM Link"),
@@ -45,11 +51,14 @@ async def verify_email(
     await redis.delete(redis_key)
     return {"message": "Email verified successfully. You can close this tab"}
 
+
 @router.get("/{discord_user_id}", response_model=UserRead)
+@limiter.limit("30/minute")
 async def get_user(
+        request: Request,
         db: DBSession,
         _auth: BotAuth,
-        discord_user_id: str
+        discord_user_id: str,
 ) -> UserRead:
     user = await user_service.get_user_by_discord_id(db, discord_user_id)
     if user is None:

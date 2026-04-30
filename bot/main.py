@@ -4,7 +4,10 @@ import sys
 
 import aiohttp
 import discord
+import sentry_sdk
 from discord.ext import commands
+from sentry_sdk.integrations.aiohttp import AioHttpIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
 
 from bot.utils.api_client import APIClient
 from shared.config import settings
@@ -15,6 +18,18 @@ logging.basicConfig(
     stream=sys.stdout
 )
 logger = logging.getLogger("artflow.bot")
+
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.environment,
+        traces_sample_rate=0.2,
+        integrations=[
+            AioHttpIntegration(),
+            LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+        ],
+        send_default_pii=False,
+    )
 
 COGS: list[str] = [
     "bot.events.on_member_join",
@@ -81,6 +96,8 @@ class ArtflowBot(commands.AutoShardedBot):
             msg = "You don't have permission to use this command"
         elif isinstance(error, discord.app_commands.CommandOnCooldown):
             msg = f"This command is on cooldown. Try again in {error.retry_after:.1f}s."
+        else:
+            sentry_sdk.capture_exception(error)
 
         logger.error("App command error: %s", error)
 
