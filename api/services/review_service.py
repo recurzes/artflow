@@ -6,7 +6,6 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Artist
 from shared.models.artist import Artist
 from shared.models.commission import Commission, CommissionStatus
 from shared.models.review import Review

@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from api.dependencies import BotAuth, DBSession
 from api.services import artist_service
-from models import Artist
+from shared.models.artist import Artist
 from shared.schemas.artist import (
     ArtistCommissionCapacity,
     ArtistCreate,

@@ -1,12 +1,31 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import sentry_sdk
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from api.routers import admin, artists, commissions, servers, users
 from shared.config import settings
 from shared.db import engine
 from shared.redis import close_pool, get_pool
 from shared.storage import close_client as close_storage_client
+
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.environment,
+        traces_sample_rate=0.2,
+        integrations=[
+            FastApiIntegration(),
+            SqlalchemyIntegration(),
+        ],
+        send_default_pii=False,
+    )
 
 
 @asynccontextmanager
@@ -26,6 +45,11 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
         lifespan=lifespan
     )
+
+    # Rate limiting middleware — backed by Redis via the limiter in dependencies.py
+    app.state.limiter = Limiter(key_func=lambda request: request.client.host)
+    app.add_middleware(SlowAPIMiddleware)
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     app.include_router(users.router)
     app.include_router(artists.router)
