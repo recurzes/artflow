@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from api.dependencies import BotAuth, DBSession
 from api.services import commission_service, review_service
-from schemas.review import ReviewRead, ReviewCreate
+from shared.schemas.review import ReviewCreate, ReviewRead
 from shared.models.commission import PaymentMethod
 from shared.schemas.commission import (
     CommissionCreate,
