@@ -1,6 +1,17 @@
+import sentry_sdk
 from celery import Celery
+from sentry_sdk.integrations.celery import CeleryIntegration
 
 from shared.config import settings
+
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.environment,
+        traces_sample_rate=0.1,
+        integrations=[CeleryIntegration()],
+        send_default_pii=False,
+    )
 
 celery_app = Celery(
     "artflow",

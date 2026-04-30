@@ -4,7 +4,8 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, status
 
 from api.dependencies import BotAuth, DBSession
-from api.services import commission_service
+from api.services import commission_service, review_service
+from shared.schemas.review import ReviewCreate, ReviewRead
 from shared.models.commission import PaymentMethod
 from shared.schemas.commission import (
     CommissionCreate,
@@ -177,7 +178,7 @@ async def confirm_payment(
         raise _bad_request(e) from e
 
 @router.post("/{commission_id}/wip-update", response_model=CommissionRead)
-async def deliver(
+async def wip_update(
         commission_id: uuid.UUID,
         body: WipCreateBody,
         db: DBSession,
@@ -211,5 +212,22 @@ async def complete(
     try:
         comm = await commission_service.complete_commission(db, commission_id)
         return CommissionRead.model_validate(comm)
+    except ValueError as e:
+        raise _bad_request(e) from e
+
+@router.post(
+    "/{commission_id}/review",
+    response_model=ReviewRead,
+    status_code=status.HTTP_201_CREATED
+)
+async def create_commission_review(
+        commission_id: uuid.UUID,
+        body: ReviewCreate,
+        db: DBSession,
+        _auth: BotAuth
+) -> ReviewRead:
+    try:
+        review = await review_service.create_review(db, commission_id, body)
+        return ReviewRead.model_validate(review)
     except ValueError as e:
         raise _bad_request(e) from e

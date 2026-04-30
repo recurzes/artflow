@@ -26,6 +26,11 @@ class Settings(BaseSettings):
 
     email_verify_ttl: int = 86400
 
+    sentry_dsn: str = ""
+
+    db_pool_size: int = 20
+    db_max_overflow: int = 50
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

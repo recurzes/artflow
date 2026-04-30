@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from shared.models.artist import Artist, ArtistStatus
 from shared.models.commission import Commission, CommissionStatus
@@ -57,6 +58,14 @@ async def update_artist(
     await db.flush()
     return artist
 
+
+async def get_artist_by_id(db: AsyncSession, artist_id: uuid.UUID) -> Artist | None:
+    result = await db.execute(
+        select(Artist).options(joinedload(Artist.user)).where(Artist.id == artist_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_artist_by_discord_id(
         db: AsyncSession,
         discord_user_id: str,
@@ -80,7 +89,11 @@ async def get_artists_for_server(
         nsfw_only: bool = False,
         active_only: bool = True
 ) -> list[Artist]:
-    query = select(Artist).where(Artist.server_id == server_id)
+    query = (
+        select(Artist)
+        .options(joinedload(Artist.user))
+        .where(Artist.server_id == server_id)
+    )
 
     if active_only:
         query = query.where(Artist.status == ArtistStatus.ACTIVE)
