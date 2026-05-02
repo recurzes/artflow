@@ -47,6 +47,13 @@ def _tos_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _block_if_disputed(comm: Commission) -> None:
+    if comm.status == CommissionStatus.DISPUTED:
+        raise ValueError(
+            "This commission is under dispute; this action is frozen until a moderator resolves it"
+        )
+
+
 async def get_commission(db: AsyncSession, commission_id: uuid.UUID) -> Commission | None:
     result = await db.execute(select(Commission).where(Commission.id == commission_id))
     return result.scalar_one_or_none()
@@ -112,6 +119,7 @@ async def transition_status(
     comm = await get_commission(db, commission_id)
     if comm is None:
         raise ValueError("Commission not found")
+    _block_if_disputed(comm)
 
     new_status = body.status
     if not _can_transition(comm.status, new_status):
@@ -137,6 +145,7 @@ async def submit_intake(
     comm = await get_commission(db, commission_id)
     if comm is None:
         raise ValueError("Commission not found")
+    _block_if_disputed(comm)
     if comm.status != CommissionStatus.INTAKE:
         raise ValueError("Intake can only be submitted while commission is in INTAKE status")
     comm.client_intake_notes = notes
@@ -152,6 +161,7 @@ async def request_counter_offer(
     comm = await get_commission(db, commission_id)
     if comm is None:
         raise ValueError("Commission not found")
+    _block_if_disputed(comm)
     if comm.status != CommissionStatus.QUOTED:
         raise ValueError("Counter-offer is only valid while commission is QUOTED")
 
@@ -175,6 +185,7 @@ async def apply_quote(
     comm = await get_commission(db, commission_id)
     if comm is None:
         raise ValueError("Commission not found")
+    _block_if_disputed(comm)
     if comm.status != CommissionStatus.INTAKE:
         raise ValueError("Quote can only be applied while commission is in INTAKE status")
 
@@ -201,6 +212,7 @@ async def confirm_tos_acceptance(
     comm = await get_commission(db, commission_id)
     if comm is None:
         raise ValueError("Commission not found")
+    _block_if_disputed(comm)
     if comm.status != CommissionStatus.TOS_PENDING:
         raise ValueError("TOS can only be accepted in TOS_PENDING status")
 
@@ -236,6 +248,7 @@ async def upload_receipt(
     comm = await get_commission(db, commission_id)
     if comm is None:
         raise ValueError("Commission not found")
+    _block_if_disputed(comm)
     if comm.status != CommissionStatus.PAYMENT_PENDING:
         raise ValueError("Receipt can only be uploaded in PAYMENT_PENDING status")
 
@@ -253,6 +266,7 @@ async def confirm_payment(
     comm = await get_commission(db, commission_id)
     if comm is None:
         raise ValueError("Commission not found")
+    _block_if_disputed(comm)
     if comm.status != CommissionStatus.PAYMENT_PENDING:
         raise ValueError("Payment can only be confirmed in PAYMENT_PENDING status")
 
@@ -275,6 +289,7 @@ async def create_wip_update(
     comm = await get_commission(db, commission_id)
     if comm is None:
         raise ValueError("Commission not found")
+    _block_if_disputed(comm)
     if comm.status not in (CommissionStatus.IN_PROGRESS, CommissionStatus.WIP):
         raise ValueError("WIP updates are only allowed in IN_PROGRESS or WIP status")
 
@@ -302,6 +317,7 @@ async def deliver(
     comm = await get_commission(db, commission_id)
     if comm is None:
         raise ValueError("Commission not found")
+    _block_if_disputed(comm)
     if comm.status != CommissionStatus.WIP:
         raise ValueError("Delivery is only allowed from WIP status")
 
@@ -321,6 +337,7 @@ async def complete_commission(db: AsyncSession, commission_id: uuid.UUID) -> Com
     comm = await get_commission(db, commission_id)
     if comm is None:
         raise ValueError("Commission not found")
+    _block_if_disputed(comm)
     if comm.status != CommissionStatus.DELIVERED:
         raise ValueError("Complete is only valid from DELIVERED status")
 
