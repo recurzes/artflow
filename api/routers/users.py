@@ -2,7 +2,13 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from api.dependencies import BotAuth, DBSession, RedisClient, limiter
 from api.services import user_service
-from shared.schemas.user import UserCreate, UserRead
+from shared.schemas.user import (
+    UserCreate,
+    UserRead,
+    Verify18ApproveBody,
+    Verify18Response,
+    Verify18Submit
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -65,5 +71,35 @@ async def get_user(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
+        )
+    return UserRead.model_validate(user)
+
+
+@router.post("/verify-18/submit", response_model=Verify18Response)
+async def submit_verify_18(
+        body: Verify18Submit,
+        db: DBSession,
+        redis: RedisClient,
+        _auth: BotAuth
+) -> Verify18Response:
+    status, detail = await user_service.submit_18_verification(db, redis, body)
+    return Verify18Response(status=status, detail=detail)
+
+@router.post("/verify-18/approve", response_model=UserRead)
+async def approve_verify_18(
+        body: Verify18ApproveBody,
+        db: DBSession,
+        redis: RedisClient,
+        _auth: BotAuth
+) -> UserRead:
+    user = await user_service.approve_18_verification(
+        db,
+        redis,
+        discord_user_id=body.discord_user_id
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found for this Discord ID"
         )
     return UserRead.model_validate(user)

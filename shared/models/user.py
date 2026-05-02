@@ -31,6 +31,10 @@ class User(Base, TimestampMixin):
         default=False,
         nullable=False
     )
+    is_18_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
     discord_account_created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True
