@@ -17,7 +17,8 @@ async def create_commission_ticket(
         *,
         artist_member: discord.Member,
         client_member: discord.Member,
-        commission_label: str
+        commission_label: str,
+        nsfw: bool = False
 ) -> discord.TextChannel:
     everyone = guild.default_role
     mod_role = discord.utils.get(guild.roles, name=ROLE_MODERATOR)
@@ -65,5 +66,6 @@ async def create_commission_ticket(
         name=name,
         category=category,
         overwrites=overwrites,
+        nsfw=nsfw,
         reason="ArtFlow commission ticket"
     )

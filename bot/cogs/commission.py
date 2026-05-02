@@ -14,7 +14,7 @@ from discord._types import ClientT
 from discord.ext import commands
 
 from bot.utils.embeds import base_embed, error_embed, success_embed, payment_instructions_embed, completed_work_embed, \
-    warning_embed
+    warning_embed, public_review_embed
 from bot.utils.tickets import create_commission_ticket
 from exchange_rates import php_to_usd
 from shared.storage import upload_receipt
@@ -71,6 +71,8 @@ async def _maybe_post_completed_works(
         comm: dict[str, Any],
         artist: dict[str, Any]
 ) -> None:
+    if comm.get("is_nsfw"):
+        return
     cid = settings.get("channel_completed_workds")
     if not cid:
         return
@@ -83,6 +85,21 @@ async def _maybe_post_completed_works(
         delivery_file_url=comm.get("delivery_file_url"),
     )
     await ch.send(embed=embed)
+
+async def _maybe_post_public_review(
+        guild: discord.Guild,
+        settings: dict[str, Any],
+        artist_name: str,
+        rating: int,
+        body: str | None
+) -> None:
+    cid = settings.get("channel_reviews")
+    if not cid:
+        return
+    ch = guild.get_channel(int(cid))
+    if not isinstance(ch, discord.TextChannel):
+        return
+    await ch.send(embed=public_review_embed(artist_name=artist_name, rating=rating, body=body))
 
 async def _tos_accept_core(
         bot: commands.Bot,
@@ -250,7 +267,8 @@ class ReviewModal(discord.ui.Modal, title="Leave a review"):
             reviewer_uuid: str,
             guild: discord.Guild,
             server_settings: dict[str, Any],
-            artist_name: str
+            artist_name: str,
+            is_nsfw: bool = False
     ) -> None:
         super().__init__()
         self.bot = bot
@@ -259,6 +277,7 @@ class ReviewModal(discord.ui.Modal, title="Leave a review"):
         self.guild = guild
         self.server_settings = server_settings
         self.artist_name = artist_name
+        self.is_nsfw = is_nsfw
 
     async def on_submit(self, interaction: Interaction) -> None:
         raw = self.rating.value.strip()
@@ -283,13 +302,14 @@ class ReviewModal(discord.ui.Modal, title="Leave a review"):
                 embed=success_embed("Thank you for your review!"),
                 ephemeral=True
             )
-            await _maybe_post_completed_works(
-                self.guild,
-                self.server_settings,
-                self.artist_name,
-                rating,
-                self.comment.value or None
-            )
+            if not self.is_nsfw:
+                await _maybe_post_public_review(
+                    self.guild,
+                    self.server_settings,
+                    self.artist_name,
+                    rating,
+                    self.comment.value or None
+                )
         except aiohttp.ClientResponseError as exc:
             await interaction.response.send_message(
                 embed=error_embed(f"Review failed: {str(exc.message)}"),
@@ -306,7 +326,8 @@ class ReviewPromptView(discord.ui.View):
             client_discord_id: int,
             guild: discord.Guild,
             server_settings: dict[str, Any],
-            artist_name: str
+            artist_name: str,
+            is_nsfw: bool = False
     ) -> None:
         super().__init__(timeout=86400)
         self.bot = bot
@@ -316,6 +337,7 @@ class ReviewPromptView(discord.ui.View):
         self.guild = guild
         self.server_settings = server_settings
         self.artist_name = artist_name
+        self.is_nsfw = is_nsfw
 
     @discord.ui.button(label="Leave a review", style=discord.ButtonStyle.success)
     async def review_btn(
@@ -336,7 +358,8 @@ class ReviewPromptView(discord.ui.View):
                 self.reviewer_uuid,
                 self.guild,
                 self.server_settings,
-                self.artist_name
+                self.artist_name,
+                is_nsfw=self.is_nsfw
             )
         )
 
@@ -461,7 +484,8 @@ class ArtistPickView(discord.ui.View):
             server_uuid: str,
             artists: list[dict[str, Any]],
             client_user: discord.Member,
-            page: int = 0
+            page: int = 0,
+            is_nsfw_request: bool = False
     ) -> None:
         super().__init__(timeout=300)
         self.bot = bot
@@ -470,6 +494,7 @@ class ArtistPickView(discord.ui.View):
         self.artists = {a["id"]: a for a in artists}
         self._page = page
         self._client_user = client_user
+        self._is_nsfw_request = is_nsfw_request
 
         n = len(artists)
         max_page = max(0, (n - 1) // PAGE_SIZE)
@@ -512,7 +537,8 @@ class ArtistPickView(discord.ui.View):
                 server_uuid=self.server_uuid,
                 artists=self._all,
                 client_user=self._client_user,
-                page=self._page - 1
+                page=self._page - 1,
+                is_nsfw_request=self._is_nsfw_request
             )
         )
 
@@ -530,7 +556,8 @@ class ArtistPickView(discord.ui.View):
                 server_uuid=self.server_uuid,
                 artists=self._all,
                 client_user=self._client_user,
-                page=self._page + 1
+                page=self._page + 1,
+                is_nsfw_request=self._is_nsfw_request
             )
         )
 
@@ -577,7 +604,8 @@ class ArtistPickView(discord.ui.View):
                 guild,
                 artist_member=artist_member,
                 client_member=interaction.user,
-                commission_label=f"{artist_id['display_name']}-{interaction.user.name}"
+                commission_label=f"{artist_id['display_name']}-{interaction.user.name}",
+                nsfw=self._is_nsfw_request
             )
 
             comm = await self.bot.api.post(
@@ -587,6 +615,7 @@ class ArtistPickView(discord.ui.View):
                     "artist_id": artist_id,
                     "client_id": client_row["id"],
                     "discord_ticket_channel_id": str(channel.id),
+                    "is_nsfw": self._is_nsfw_request
                 },
             )
             comm_id = comm["id"]
@@ -641,13 +670,15 @@ class CommissionCog(commands.Cog, name="Commissions"):
         description="Start a new commission request (choose an artist)",
     )
     @app_commands.describe(
-        nsfw_only="Show only artists who accept NSFW",
+        nsfw_only="Show only artists who accept NSFW (requires 18+ verification to open NSFW tickets)",
+        nsfw="Open an NSFW ticket (client must be 18+ verified; artist must allow NSFW)",
         style="Filter by style (substring match)"
     )
     async def commission_request(
             self,
             interaction: discord.InteractionMessage,
             nsfw_only: bool = False,
+            nsfw: bool = False,
             style: str | None = None
     ) -> None:
         await interaction.response.defer(ephemeral=True)
@@ -683,11 +714,14 @@ class CommissionCog(commands.Cog, name="Commissions"):
                 bot=self.bot,
                 server_uuid=server_uuid,
                 artists=artists_raw,
-                client_user=interaction.user
+                client_user=interaction.user,
+                is_nsfw_request=nsfw
             )
             desc = "Select an artist below. Use Previous/Next if there are many"
             if nsfw_only or (style and style.strip()):
                 desc += " Filters are applied"
+            if nsfw:
+                desc += " This will create an **NSFW** ticket (18+ only)"
             await interaction.followup.send(
                 embed=base_embed(
                     title="Open a commission",
@@ -1018,6 +1052,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
                 )
 
             await interaction.channel.send(embed=success_embed("Commissions completed. Thank you!"))
+            is_nsfw = bool(comm_done.get("is_nsfw"))
             await interaction.channel.send(
                 embed=base_embed(
                     title="Leave a review",
@@ -1030,7 +1065,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
                     interaction.user.id,
                     interaction.guild,
                     settings,
-                    artist.get("display_name", "Artist")
+                    artist.get("display_name", "Artist"),
+                    is_nsfw=is_nsfw
                 )
             )
             await interaction.followup.send(embed=success_embed("Marked complete"), ephemeral=True)
@@ -1072,7 +1108,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
             artist = await self.bot.api.get(f"/artists/{comm['artist_id']}")
             server = await self.bot.api.get(f"/servers/{interaction.guild.id}")
             settings = server.get("settings") or {}
-            if isinstance(settings, dict):
+            if isinstance(settings, dict) and not comm.get("is_nsfw"):
                 await _maybe_post_completed_works(
                     interaction.guild,
                     settings,
