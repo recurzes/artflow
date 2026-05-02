@@ -498,6 +498,65 @@ class ArtistCog(commands.Cog, name="Artists"):
             ephemeral=True
         )
 
+    @settings_group.command(
+        name="nsfw",
+        description="Enable or disable NSFW commission requests (Week 9)"
+    )
+    @app_commands.describe(enabled="Whether you accept NSFW commissions")
+    async def settings_nsfw(
+            self,
+            interaction: discord.Interaction,
+            enabled: bool
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send(
+                embed=error_embed("Use this command in a server"),
+                ephemeral=True
+            )
+            return
+        try:
+            server = await self.bot.api.get(f"/servers/{guild.id}")
+            artists_raw = await self.bot.api.get_any(
+                "/artists",
+                params={"server_id": server["id"]}
+            )
+        except aiohttp.ClientResponseError as exc:
+            await interaction.followup.send(
+                embed=error_embed(f"API error: {str(exc.message)}"),
+                ephemeral=True
+            )
+            return
+        if not isinstance(artists_raw, list):
+            await interaction.followup.send(
+                embed=error_embed("Invalid response from API"),
+                ephemeral=True,
+            )
+            return
+        me = str(interaction.user.id)
+        artist_row = next(
+            (a for a in artists_raw if a.get("discord_user_id") == me),
+            None
+        )
+        if artist_row is None:
+            await interaction.followup.send(
+                embed=error_embed(f"Not an artist: You are not registered on this server"),
+                ephemeral=True
+            )
+            return
+        await self.bot.api.patch(
+            f"/artists/{artist_row['id']}",
+            json={"nsfw_enabled": enabled}
+        )
+        await interaction.followup.send(
+            embed=success_embed(
+                "NSFW setting updated",
+                f"NSFW commissions are now **{'enabled' if enabled else 'disabled'}**"
+            ),
+            ephemeral=True
+        )
+
     commissions_group = app_commands.Group(
         name="commissions",
         description="Manage your commission availability."

@@ -68,12 +68,22 @@ async def create_commission(db: AsyncSession, data: CommissionCreate) -> Commiss
         raise ValueError("Server not found")
 
     a = await db.execute(select(Artist).where(Artist.id) == data.artist_id)
-    if a.scalar_one_or_none() is None:
+    artist = a.scalar_one_or_none()
+    if artist is None:
         raise ValueError("Artist now found")
 
     u = await db.execute(select(User).where(User.id == data.client_id))
-    if u.scalar_one_or_none() is None:
+    client_user = u.scalar_one_or_none()
+    if client_user is None:
         raise ValueError("Client user not found")
+
+    if data.is_nsfw:
+        if not client_user.is_user_18_verified:
+            raise ValueError(
+                "Client must complete 18+ verification before NSFW commissions"
+            )
+        if not artist.nsfw_enabled:
+            raise ValueError("This artist has not enabled NSFW commissions")
 
     comm = Commission(
         server_id=data.server_id,
