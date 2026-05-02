@@ -9,6 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.utils.audit_log import format_commission_snapshot, post_admin_log
 from bot.utils.embeds import base_embed, error_embed, success_embed
 from shared.discord_layout import ROLE_MODERATOR
 
@@ -104,6 +105,16 @@ class DisputeResolveView(discord.ui.View):
             content=f"**Resolved** by {interaction.user.mention} — {label}",
             view=self
         )
+        if interaction.guild:
+            await post_admin_log(
+                interaction.guild,
+                title="Dispute resolved",
+                description=label,
+                fields={
+                    "Dispute": self.dispute_id,
+                    "Commission": self.commission_id
+                }
+            )
 
 
 class DisputeCog(commands.Cog, name="Disputes"):
@@ -173,7 +184,12 @@ class DisputeCog(commands.Cog, name="Disputes"):
             ),
             view=view
         )
-        # Admin log
+        await post_admin_log(
+            interaction.guild,
+            title="Dispute opened",
+            description=reason[:2000],
+            fields=format_commission_snapshot(comm)
+        )
 
         await interaction.followup.send(
             embed=success_embed("Dispute recorded", "Moderators have been notified"),
