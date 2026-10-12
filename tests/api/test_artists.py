@@ -8,35 +8,6 @@ from tests.conftest import make_discord_id
 from tests.factories import make_artist, make_server, make_user
 
 
-async def test_create_artist_returns_the_full_profile(client, db):
-    server = await make_server(db)
-    user = await make_user(db)
-
-    response = await client.post(
-        "/artists",
-        json={
-            "user_id": str(user.id),
-            "server_id": str(server.id),
-            "display_name": "Mika",
-            "styles": ["anime", "chibi"],
-            "price_min_php": "0",
-            "price_max_php": "3000",
-            "max_active_commissions": 3,
-            "gcash_number": "09171234567",
-            "paypal_email": "mika@example.com",
-        },
-    )
-
-    assert response.status_code == 201, response.text
-    data = response.json()
-    assert data["discord_user_id"] == user.discord_user_id
-    assert data["max_active_commissions"] == 3
-    assert data["paypal_email"] == "mika@example.com"
-    assert data["price_min_php"] is not None  # zero is a price, not "unset"
-    assert float(data["price_min_php"]) == 0
-    assert data["status"] == "ACTIVE"
-
-
 async def test_get_artist(client, db):
     artist = await make_artist(db, tos_text="Be nice.")
 

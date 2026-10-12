@@ -1,4 +1,4 @@
-from shared.schemas.artist import ArtistCreate, ArtistListItem, ArtistRead, ArtistUpdate
+from shared.schemas.artist import ArtistApplication, ArtistListItem, ArtistRead, ArtistUpdate
 from shared.schemas.commission import (
     CommissionCreate,
     CommissionRead,
@@ -13,7 +13,7 @@ __all__ = [
     "UUIDSchema",
     "UserCreate",
     "UserRead",
-    "ArtistCreate",
+    "ArtistApplication",
     "ArtistListItem",
     "ArtistRead",
     "ArtistUpdate",
