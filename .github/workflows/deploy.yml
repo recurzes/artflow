@@ -45,6 +45,25 @@ jobs:
       - name: Test
         run: uv run --frozen --extra dev pytest
 
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    # Reports known vulnerabilities in uv.lock. It does not block the deploy: a new
+    # advisory against an unchanged lockfile should not stop an unrelated fix.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.17"
+
+      - name: Audit locked dependencies
+        run: |
+          uv export --frozen --no-hashes --no-emit-project -o requirements.txt
+          uvx pip-audit -r requirements.txt --no-deps --disable-pip
+
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest

@@ -46,7 +46,7 @@ async def test_every_cog_loads() -> None:
 
 
 def test_every_router_is_mounted() -> None:
-    prefixes = {route.path.split("/")[1] for route in app.routes}
+    prefixes = {path.split("/")[1] for path in app.openapi()["paths"]}
     assert {"users", "artists", "commissions", "disputes", "servers", "admin"} <= prefixes
 
 
