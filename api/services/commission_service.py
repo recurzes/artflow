@@ -8,6 +8,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.errors import Conflict, Forbidden, InvalidState, NotFound
 from shared.models.artist import Artist
 from shared.models.commission import Commission, CommissionStatus, PaymentMethod
 from shared.models.server import Server
@@ -49,7 +50,7 @@ def _tos_hash(text: str) -> str:
 
 def _block_if_disputed(comm: Commission) -> None:
     if comm.status == CommissionStatus.DISPUTED:
-        raise ValueError(
+        raise InvalidState(
             "This commission is under dispute; this action is frozen until a moderator resolves it"
         )
 
@@ -72,25 +73,25 @@ async def get_commission_by_discord_channel_id(
 async def create_commission(db: AsyncSession, data: CommissionCreate) -> Commission:
     s = await db.execute(select(Server).where(Server.id == data.server_id))
     if s.scalar_one_or_none() is None:
-        raise ValueError("Server not found")
+        raise NotFound("Server not found")
 
     a = await db.execute(select(Artist).where(Artist.id) == data.artist_id)
     artist = a.scalar_one_or_none()
     if artist is None:
-        raise ValueError("Artist now found")
+        raise NotFound("Artist not found")
 
     u = await db.execute(select(User).where(User.id == data.client_id))
     client_user = u.scalar_one_or_none()
     if client_user is None:
-        raise ValueError("Client user not found")
+        raise NotFound("Client user not found")
 
     if data.is_nsfw:
         if not client_user.is_user_18_verified:
-            raise ValueError(
+            raise Forbidden(
                 "Client must complete 18+ verification before NSFW commissions"
             )
         if not artist.nsfw_enabled:
-            raise ValueError("This artist has not enabled NSFW commissions")
+            raise InvalidState("This artist has not enabled NSFW commissions")
 
     comm = Commission(
         server_id=data.server_id,
@@ -118,12 +119,12 @@ async def transition_status(
 ) -> Commission:
     comm = await get_commission(db, commission_id)
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
     _block_if_disputed(comm)
 
     new_status = body.status
     if not _can_transition(comm.status, new_status):
-        raise ValueError(
+        raise InvalidState(
             f"Invalid transition from {comm.status.value} to {new_status.value}"
         )
 
@@ -144,10 +145,10 @@ async def submit_intake(
 ) -> Commission:
     comm = await get_commission(db, commission_id)
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
     _block_if_disputed(comm)
     if comm.status != CommissionStatus.INTAKE:
-        raise ValueError("Intake can only be submitted while commission is in INTAKE status")
+        raise InvalidState("Intake can only be submitted while commission is in INTAKE status")
     comm.client_intake_notes = notes
     await db.flush()
     return comm
@@ -160,13 +161,13 @@ async def request_counter_offer(
 ) -> Commission:
     comm = await get_commission(db, commission_id)
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
     _block_if_disputed(comm)
     if comm.status != CommissionStatus.QUOTED:
-        raise ValueError("Counter-offer is only valid while commission is QUOTED")
+        raise InvalidState("Counter-offer is only valid while commission is QUOTED")
 
     if not _can_transition(comm.status, CommissionStatus.INTAKE):
-        raise ValueError("Cannot return to INTAKE from current status")
+        raise InvalidState("Cannot return to INTAKE from current status")
 
     comm.quoted_price_php = None
     comm.quoted_price_usd = None
@@ -184,10 +185,10 @@ async def apply_quote(
 ) -> Commission:
     comm = await get_commission(db, commission_id)
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
     _block_if_disputed(comm)
     if comm.status != CommissionStatus.INTAKE:
-        raise ValueError("Quote can only be applied while commission is in INTAKE status")
+        raise InvalidState("Quote can only be applied while commission is in INTAKE status")
 
     comm.quoted_price_php = float(quote.quoted_price_php)
     if quote.quoted_price_usd is not None:
@@ -198,7 +199,7 @@ async def apply_quote(
         comm.deadline_at = quote.deadline_at
 
     if not _can_transition(comm.status, CommissionStatus.QUOTED):
-        raise ValueError("Cannot move to QUOTED from current status")
+        raise InvalidState("Cannot move to QUOTED from current status")
     comm.status = CommissionStatus.QUOTED
     await db.flush()
     return comm
@@ -211,24 +212,24 @@ async def confirm_tos_acceptance(
 ) -> Commission:
     comm = await get_commission(db, commission_id)
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
     _block_if_disputed(comm)
     if comm.status != CommissionStatus.TOS_PENDING:
-        raise ValueError("TOS can only be accepted in TOS_PENDING status")
+        raise InvalidState("TOS can only be accepted in TOS_PENDING status")
 
     result = await db.execute(
         select(Artist).where(Artist.id == comm.artist_id)
     )
     artist = result.scalar_one_or_none()
     if artist is None or not artist.tos_text:
-        raise ValueError("Artist has no TOS text configured")
+        raise InvalidState("Artist has no TOS text configured")
 
     expected = _tos_hash(artist.tos_text)
     if tos_version_hash != expected:
-        raise ValueError("TOS hash does not match the artist's current TOS text")
+        raise Conflict("TOS hash does not match the artist's current TOS text")
 
     if not _can_transition(comm.status, CommissionStatus.PAYMENT_PENDING):
-        raise ValueError("Invalid transition to PAYMENT_PENDING")
+        raise InvalidState("Invalid transition to PAYMENT_PENDING")
 
     now = _utcnow()
     comm.tos_accepted_at = now
@@ -247,10 +248,10 @@ async def upload_receipt(
 ) -> Commission:
     comm = await get_commission(db, commission_id)
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
     _block_if_disputed(comm)
     if comm.status != CommissionStatus.PAYMENT_PENDING:
-        raise ValueError("Receipt can only be uploaded in PAYMENT_PENDING status")
+        raise InvalidState("Receipt can only be uploaded in PAYMENT_PENDING status")
 
     comm.payment_receipt_url = payment_receipt_url
     await db.flush()
@@ -265,13 +266,13 @@ async def confirm_payment(
 ) -> Commission:
     comm = await get_commission(db, commission_id)
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
     _block_if_disputed(comm)
     if comm.status != CommissionStatus.PAYMENT_PENDING:
-        raise ValueError("Payment can only be confirmed in PAYMENT_PENDING status")
+        raise InvalidState("Payment can only be confirmed in PAYMENT_PENDING status")
 
     if not _can_transition(comm.status, CommissionStatus.IN_PROGRESS):
-        raise ValueError("Invalid transition to IN_PROGRESS")
+        raise InvalidState("Invalid transition to IN_PROGRESS")
 
     comm.payment_confirmed_at = _utcnow()
     comm.payment_method = payment_method or PaymentMethod.GCASH
@@ -288,10 +289,10 @@ async def create_wip_update(
 ) -> Commission:
     comm = await get_commission(db, commission_id)
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
     _block_if_disputed(comm)
     if comm.status not in (CommissionStatus.IN_PROGRESS, CommissionStatus.WIP):
-        raise ValueError("WIP updates are only allowed in IN_PROGRESS or WIP status")
+        raise InvalidState("WIP updates are only allowed in IN_PROGRESS or WIP status")
 
     wip = WipUpdate(
         commission_id=comm.id,
@@ -302,7 +303,7 @@ async def create_wip_update(
 
     if comm.status == CommissionStatus.IN_PROGRESS:
         if not _can_transition(comm.status, CommissionStatus.WIP):
-            raise ValueError("Cannot transition to WIP")
+            raise InvalidState("Cannot transition to WIP")
         comm.status = CommissionStatus.WIP
 
     await db.flush()
@@ -316,13 +317,13 @@ async def deliver(
 ) -> Commission:
     comm = await get_commission(db, commission_id)
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
     _block_if_disputed(comm)
     if comm.status != CommissionStatus.WIP:
-        raise ValueError("Delivery is only allowed from WIP status")
+        raise InvalidState("Delivery is only allowed from WIP status")
 
     if not _can_transition(comm.status, CommissionStatus.DELIVERED):
-        raise ValueError("Invalid transition to DELIVERED")
+        raise InvalidState("Invalid transition to DELIVERED")
 
     now = _utcnow()
     comm.delivery_file_url = final_file_url
@@ -336,13 +337,13 @@ async def deliver(
 async def complete_commission(db: AsyncSession, commission_id: uuid.UUID) -> Commission:
     comm = await get_commission(db, commission_id)
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
     _block_if_disputed(comm)
     if comm.status != CommissionStatus.DELIVERED:
-        raise ValueError("Complete is only valid from DELIVERED status")
+        raise InvalidState("Complete is only valid from DELIVERED status")
 
     if not _can_transition(comm.status, CommissionStatus.COMPLETED):
-        raise ValueError("Invalid transition to COMPLETED")
+        raise InvalidState("Invalid transition to COMPLETED")
 
     now = _utcnow()
     comm.completed_at = now

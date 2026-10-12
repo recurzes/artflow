@@ -6,6 +6,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.errors import Conflict, Forbidden, InvalidState, NotFound
 from shared.models.artist import Artist
 from shared.models.commission import Commission, CommissionStatus
 from shared.models.review import Review
@@ -20,18 +21,18 @@ async def create_review(
     result = await db.execute(select(Commission).where(Commission.id == commission_id))
     comm = result.scalar_one_or_none()
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
     if comm.status != CommissionStatus.COMPLETED:
-        raise ValueError("Commission must be completed before leaving a review")
+        raise InvalidState("Commission must be completed before leaving a review")
 
     if data.reviewer_id != comm.client_id:
-        raise ValueError("Only the commissioning client can review this commission")
+        raise Forbidden("Only the commissioning client can review this commission")
 
     existing = await db.execute(
         select(Review).where(Review.commission_id == commission_id)
     )
     if existing.scalar_one_or_none() is not None:
-        raise ValueError("A review already exists for this commission")
+        raise Conflict("A review already exists for this commission")
 
     review = Review(
         commission_id=commission_id,
