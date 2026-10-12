@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import discord
 
 from bot.cogs.admin import AdminGroup
-from bot.cogs.artist import ApproveRejectView
+from bot.cogs.artist import ApproveApplicationButton, RejectApplicationButton
 from bot.main import ArtflowBot
 from bot.utils.guild_setup import STAFF_ONLY_CHANNELS, _staff_only_overwrites
 from bot.utils.permissions import is_admin, is_staff
@@ -85,10 +85,11 @@ async def test_admin_group_rejects_non_admin_at_runtime():
 
 
 async def test_only_staff_can_review_artist_applications():
-    view = ApproveRejectView(application={})
+    artist_id = "0d9f6b1e-5a52-4b6e-9a53-0c1f6f0f9f11"
+    for button in (ApproveApplicationButton(artist_id), RejectApplicationButton(artist_id)):
+        denied = make_interaction(make_member())
+        assert await button.interaction_check(denied) is False
+        denied.response.send_message.assert_awaited_once()
 
-    denied = make_interaction(make_member())
-    assert await view.interaction_check(denied) is False
-    denied.response.send_message.assert_awaited_once()
-
-    assert await view.interaction_check(make_interaction(make_member(roles=(ROLE_MODERATOR,))))
+        moderator = make_interaction(make_member(roles=(ROLE_MODERATOR,)))
+        assert await button.interaction_check(moderator)

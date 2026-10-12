@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 import logging
+import re
+from typing import Any
 
 import discord
 from discord import app_commands
@@ -21,14 +25,10 @@ from shared.discord_layout import (
     ROLE_VERIFIED_ARTIST,
     SHOWCASE_BY_SLUG,
 )
-from shared.redis import get_redis
 
 logger = logging.getLogger(__name__)
 
 SHOWCASE_CHANNELS = SHOWCASE_BY_SLUG
-
-REAPPLY_LOCK_TTL = 60 * 60 * 24 * 7
-
 
 # Artist Application Modal
 
@@ -65,56 +65,33 @@ class ArtistApplyModal(discord.ui.Modal, title="ArtFlow — Artist Application")
 
         member = interaction.user
         guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send(
+                embed=error_embed("Use this command in a server"),
+                ephemeral=True
+            )
+            return
 
-        redis = get_redis()
-        lock_key = f"artist_reapply_lock:{guild.id}:{member.id}"
-        try:
-            if await redis.exists(lock_key):
-                ttl = await redis.ttl(lock_key)
-                days = max(1, ttl // 86400)
-                await interaction.followup.send(
-                    embed=warning_embed(
-                        "Application Locked",
-                        f"Your application was recently rejected. You may reapply in {days} day(s)."
-                    ),
-                    ephemeral=True
-                )
-                return
-
-        finally:
-            await redis.aclose()
-
-        social_lines = [
-            line.strip()
-            for line in self.social_links.value.splitlines()
-            if line.strip()
-        ]
-        if len(social_lines) < 2:
+        social_links = _parse_social_links(self.social_links.value)
+        if len(social_links) < 2:
             await interaction.followup.send(
                 embed=error_embed("Please provide at least 2 social links (one per line)"),
                 ephemeral=True
             )
             return
 
-        price_min, price_max = _parse_price_range(self.price_range.value)
-
         gcash, paypal = _parse_payment_info(self.gcash_paypal.value)
+        if gcash is None and paypal is None:
+            await interaction.followup.send(
+                embed=error_embed("Enter a GCash number (digits only) or a PayPal email address"),
+                ephemeral=True
+            )
+            return
 
+        price_min, price_max = _parse_price_range(self.price_range.value)
         style_list = [s.strip().lower() for s in self.styles.value.split(",") if s.strip()]
 
-        application = {
-            "discord_user_id": str(member.id),
-            "discord_username": str(member),
-            "display_name": self.display_name.value,
-            "styles": style_list,
-            "social_links_raw": self.social_links.value,
-            "price_min_php": price_min,
-            "price_max_php": price_max,
-            "gcash_number": gcash,
-            "paypal_email": paypal
-        }
-
-        queue_channel = discord.utils.get(guild.channels, name=CHANNEL_VERIFICATION_QUEUE)
+        queue_channel = discord.utils.get(guild.text_channels, name=CHANNEL_VERIFICATION_QUEUE)
         if queue_channel is None:
             logger.warning("verification-queue channel not found in %s", guild.name)
             await interaction.followup.send(
@@ -125,9 +102,32 @@ class ArtistApplyModal(discord.ui.Modal, title="ArtFlow — Artist Application")
             )
             return
 
-        embed = _build_application_embed(member, application)
-        view = ApproveRejectView(application=application)
-        await queue_channel.send(embed=embed, view=view)
+        # The application is stored by the API as a pending artist, so it survives
+        # restarts and the Approve / Reject buttons only need to carry its ID.
+        try:
+            artist = await interaction.client.api.apply_as_artist(
+                guild_id=guild.id,
+                discord_user_id=member.id,
+                account_created_at=member.created_at.isoformat(),
+                display_name=self.display_name.value.strip(),
+                styles=style_list,
+                social_links=social_links,
+                price_min_php=price_min,
+                price_max_php=price_max,
+                gcash_number=gcash,
+                paypal_email=paypal
+            )
+        except APIError as exc:
+            await interaction.followup.send(
+                embed=warning_embed("Application not submitted", exc.detail),
+                ephemeral=True
+            )
+            return
+
+        await queue_channel.send(
+            embed=build_application_embed(artist, member),
+            view=application_review_view(artist["id"])
+        )
 
         await interaction.followup.send(
             embed=success_embed(
@@ -139,7 +139,174 @@ class ArtistApplyModal(discord.ui.Modal, title="ArtFlow — Artist Application")
         )
 
 
-# Approve / Reject Views
+# Approve / Reject
+
+APPROVE_BUTTON_ID = "artflow:artist_approve"
+REJECT_BUTTON_ID = "artflow:artist_reject"
+_UUID_PATTERN = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+
+
+async def _staff_only(interaction: discord.Interaction) -> bool:
+    if is_staff(interaction.user):
+        return True
+    await interaction.response.send_message(
+        embed=error_embed("Only moderators can review artist applications"),
+        ephemeral=True
+    )
+    return False
+
+
+async def _mark_decided(
+        message: discord.Message | None,
+        artist: dict[str, Any],
+        member: discord.Member | None,
+        *,
+        status: str,
+        moderator: discord.abc.User
+) -> None:
+    if message is None:
+        return
+    try:
+        await message.edit(
+            embed=build_application_embed(artist, member, status=status, moderator=moderator),
+            view=None
+        )
+    except discord.HTTPException:
+        logger.warning("Could not update application message %s", message.id)
+
+
+class ApproveApplicationButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=rf"{APPROVE_BUTTON_ID}:(?P<artist_id>{_UUID_PATTERN})"
+):
+    def __init__(self, artist_id: str) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Approve",
+                style=discord.ButtonStyle.success,
+                custom_id=f"{APPROVE_BUTTON_ID}:{artist_id}"
+            )
+        )
+        self.artist_id = artist_id
+
+    @classmethod
+    async def from_custom_id(
+            cls,
+            interaction: discord.Interaction,
+            item: discord.ui.Button,
+            match: re.Match[str],
+            /
+    ) -> ApproveApplicationButton:
+        return cls(match["artist_id"])
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await _staff_only(interaction)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        api = interaction.client.api
+
+        try:
+            artist = await api.get_artist(self.artist_id)
+            member = guild.get_member(int(artist["discord_user_id"]))
+            if member is None:
+                await interaction.followup.send(
+                    embed=error_embed("Member not found in server — they may have left"),
+                    ephemeral=True
+                )
+                return
+            artist = await api.approve_artist(self.artist_id, moderator=interaction.user.id)
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(exc.detail), ephemeral=True)
+            return
+
+        artist_role = discord.utils.get(guild.roles, name=ROLE_VERIFIED_ARTIST)
+        if artist_role:
+            try:
+                await member.add_roles(artist_role, reason="Artist application approved")
+            except discord.Forbidden:
+                logger.error("Cannot add Verified Artist role to %s", member)
+
+        directory_channel = discord.utils.get(guild.text_channels, name=CHANNEL_ARTIST_DIRECTORY)
+        if directory_channel:
+            intro_embed = artist_profile_embed(
+                display_name=artist["display_name"],
+                styles=artist["styles"],
+                price_min=_float_or_none(artist.get("price_min_php")),
+                price_max=_float_or_none(artist.get("price_max_php")),
+                rating_avg=0.0,
+                rating_count=0,
+                status="ACTIVE"
+            )
+            intro_embed.set_author(name=str(member), icon_url=member.display_avatar.url)
+            try:
+                await directory_channel.send(embed=intro_embed)
+            except discord.HTTPException:
+                logger.warning("Could not post to the artist directory in %s", guild.name)
+
+        try:
+            await member.send(
+                embed=success_embed(
+                    "Welcome, Artist!",
+                    "Your artist profile is now live.\n\n"
+                    "**Commands available to you:**\n"
+                    "`/showcase` — post portfolio images to category channels\n"
+                    "`/settings tos` — set the terms clients accept before paying\n"
+                    "`/settings nsfw` — choose whether you take NSFW commissions\n"
+                    "`/quote` — post a price quote inside a commission ticket\n"
+                    "`/wip` — post a work-in-progress update\n"
+                    "`/deliver` — deliver the final file to your client\n\n"
+                    "Set your terms with `/settings tos` first: clients cannot pay "
+                    "until you have.",
+                )
+            )
+        except discord.Forbidden:
+            pass
+
+        await _mark_decided(
+            interaction.message,
+            artist,
+            member,
+            status="APPROVED",
+            moderator=interaction.user
+        )
+        await interaction.followup.send(
+            f"Approved {member.mention} as Verified Artist", ephemeral=True
+        )
+
+
+class RejectApplicationButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=rf"{REJECT_BUTTON_ID}:(?P<artist_id>{_UUID_PATTERN})"
+):
+    def __init__(self, artist_id: str) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Reject",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"{REJECT_BUTTON_ID}:{artist_id}"
+            )
+        )
+        self.artist_id = artist_id
+
+    @classmethod
+    async def from_custom_id(
+            cls,
+            interaction: discord.Interaction,
+            item: discord.ui.Button,
+            match: re.Match[str],
+            /
+    ) -> RejectApplicationButton:
+        return cls(match["artist_id"])
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await _staff_only(interaction)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_modal(RejectReasonModal(self.artist_id))
+
+
 class RejectReasonModal(discord.ui.Modal, title="Rejection Reason"):
     reason = discord.ui.TextInput(
         label="Reason for rejection",
@@ -148,25 +315,24 @@ class RejectReasonModal(discord.ui.Modal, title="Rejection Reason"):
         max_length=500
     )
 
-    def __init__(self, application: dict, original_message: discord.Message) -> None:
+    def __init__(self, artist_id: str) -> None:
         super().__init__()
-        self.application = application
-        self.original_message = original_message
+        self.artist_id = artist_id
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
 
-        guild = interaction.guild
-        discord_user_id = self.application["discord_user_id"]
-        member = guild.get_member(int(discord_user_id))
-
-        redis = get_redis()
-        lock_key = f"artist_reapply_lock:{guild.id}:{discord_user_id}"
         try:
-            await redis.setex(lock_key, REAPPLY_LOCK_TTL, "1")
-        finally:
-            await redis.aclose()
+            artist = await interaction.client.api.reject_artist(
+                self.artist_id,
+                moderator=interaction.user.id,
+                reason=self.reason.value
+            )
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(exc.detail), ephemeral=True)
+            return
 
+        member = interaction.guild.get_member(int(artist["discord_user_id"]))
         if member:
             try:
                 await member.send(
@@ -180,179 +346,23 @@ class RejectReasonModal(discord.ui.Modal, title="Rejection Reason"):
             except discord.Forbidden:
                 pass
 
-        try:
-            await self.original_message.edit(
-                embed=_build_application_embed(
-                    member or discord_user_id,
-                    self.application,
-                    status="REJECTED",
-                    mod=interaction.user
-                ),
-                view=None
-            )
-        except discord.HTTPException:
-            pass
-
+        await _mark_decided(
+            interaction.message,
+            artist,
+            member,
+            status="REJECTED",
+            moderator=interaction.user
+        )
         await interaction.followup.send(
             "Application rejected. Artist notified (if DMs are open).", ephemeral=True
         )
 
-class ApproveRejectView(discord.ui.View):
-    def __init__(self, application: dict) -> None:
-        super().__init__()
-        self.application = application
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if is_staff(interaction.user):
-            return True
-        await interaction.response.send_message(
-            embed=error_embed("Only moderators can review artist applications"),
-            ephemeral=True
-        )
-        return False
-
-    @discord.ui.button(
-        label="Approve",
-        style=discord.ButtonStyle.success,
-        custom_id="artflow:artist_approve"
-    )
-    async def approve(
-            self,
-            interaction: discord.Interaction,
-            button: discord.ui.Button
-    ) -> None:
-        await interaction.response.defer(ephemeral=True)
-        guild = interaction.guild
-        discord_user_id = self.application["discord_user_id"]
-        member = guild.get_member(int(discord_user_id))
-
-        if member is None:
-            await interaction.followup.send(
-                embed=error_embed("Member not found in server — they may have left"),
-                ephemeral=True
-            )
-            return
-
-        try:
-            bot = interaction.client
-            server_row = await bot.api.find_server(guild.id)
-            if server_row is None:
-                await interaction.followup.send(
-                    embed=error_embed(
-                        "Server not registered. Re-invite the bot or contact an admin"
-                    ),
-                    ephemeral=True
-                )
-                return
-            server_uuid = server_row.get("id")
-            if not server_uuid:
-                await interaction.followup.send(
-                    embed=error_embed(
-                        "Server not registered. Re-invite the bot or contact an admin"
-                    ),
-                    ephemeral=True
-                )
-                return
-            user_row = await bot.api.upsert_user(
-                member.id,
-                account_created_at=member.created_at.isoformat()
-            )
-            await bot.api.create_artist(
-                user_id=user_row["id"],
-                server_id=server_uuid,
-                display_name=self.application["display_name"],
-                styles=self.application["styles"],
-                price_min_php=self.application.get("price_min_php"),
-                price_max_php=self.application.get("price_max_php"),
-                gcash_number=self.application.get("gcash_number"),
-                paypal_email=self.application.get("paypal_email"),
-            )
-        except Exception as exc:
-            logger.error("Failed to create artist via API: %s", exc)
-            await interaction.followup.send(
-                embed=error_embed("API error creating artist record. Check logs"),
-                ephemeral=True
-            )
-            return
-
-        artist_role = discord.utils.get(guild.roles, name=ROLE_VERIFIED_ARTIST)
-        if artist_role:
-            try:
-                await member.add_roles(artist_role, reason="Artist application approved")
-            except discord.Forbidden:
-                logger.error("Cannot add Verified Artist role to %s", member)
-
-        # Post intro embed
-        directory_channel = discord.utils.get(guild.channels, name=CHANNEL_ARTIST_DIRECTORY)
-        if directory_channel:
-            price_min = self.application.get("price_min_php")
-            price_max = self.application.get("price_max_php")
-            intro_embed = artist_profile_embed(
-                display_name=self.application["display_name"],
-                styles=self.application["styles"],
-                price_min=price_min,
-                price_max=price_max,
-                rating_avg=0.0,
-                rating_count=0,
-                status="ACTIVE"
-            )
-            intro_embed.set_author(name=str(member), icon_url=member.display_avatar.url)
-            await directory_channel.send(embed=intro_embed)
-
-
-        # Send welcome DM
-        try:
-            await member.send(
-                embed=success_embed(
-                    "Welcome, Artist!",
-                    "Your artist profile is now live.\n\n"
-                    "**Commands available to you:**\n"
-                    "`/showcase` — post portfolio images to category channels\n"
-                    "`/commissions open` — mark yourself as open for commissions\n"
-                    "`/commissions close` — mark yourself as closed\n"
-                    "`/quote` — post a price quote inside a commission ticket\n"
-                    "`/wip` — post a work-in-progress update\n"
-                    "`/deliver` — deliver the final file to your client\n"
-                    "`/settings` — update your profile, TOS, and payment info",
-                )
-            )
-        except discord.Forbidden:
-            pass
-
-        # Update queue
-        try:
-            await interaction.message.edit(
-                embed=_build_application_embed(
-                    member,
-                    self.application,
-                    status="APPROVED",
-                    mod=interaction.user
-                ),
-                view=None
-            )
-        except discord.HTTPException:
-            pass
-
-        await interaction.followup.send(
-            f"Approved {member.mention} as Verified Artist", ephemeral=True
-        )
-
-    @discord.ui.button(
-        label="Reject",
-        style=discord.ButtonStyle.danger,
-        custom_id="artflow:artist_reject"
-    )
-    async def reject(
-            self,
-            interaction: discord.Interaction,
-            button: discord.ui.Button
-    ) -> None:
-        await interaction.response.send_modal(
-            RejectReasonModal(
-                application=self.application,
-                original_message=interaction.message
-            )
-        )
+def application_review_view(artist_id: str) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(ApproveApplicationButton(artist_id))
+    view.add_item(RejectApplicationButton(artist_id))
+    return view
 
 
 # Artist Cog
@@ -589,6 +599,10 @@ class ArtistCog(commands.Cog, name="Artists"):
 
 
 # Helpers
+def _float_or_none(value: Any) -> float | None:
+    return None if value is None else float(value)
+
+
 def _parse_price_range(value: str) -> tuple[float | None, float | None]:
     try:
         parts = [p.strip().replace(",", "") for p in value.replace("–", "-").split("-")]
@@ -601,19 +615,42 @@ def _parse_price_range(value: str) -> tuple[float | None, float | None]:
 
     return None, None
 
+
 def _parse_payment_info(value: str) -> tuple[str | None, str | None]:
+    """Split the single payment field into (gcash_number, paypal_email)."""
     value = value.strip()
-    if value.startswith("09") and value.replace(" ", "").isdigit():
-        return value.replace(" ", ""), None
     if "@" in value:
         return None, value
-    return value, None
+    digits = re.sub(r"[\s\-+()]", "", value)
+    if digits.isdigit() and 7 <= len(digits) <= 20:
+        return digits, None
+    return None, None
 
-def _build_application_embed(
-        member: discord.Member | str,
-        application: dict,
+
+def _parse_social_links(value: str) -> dict[str, str]:
+    """One link per line, optionally labelled: `Twitter: https://x.com/me`."""
+    links: dict[str, str] = {}
+    for line in value.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        match = re.match(r"^([^:/\s][^:/]*?)\s*:\s*(\S.*)$", line)
+        if match and not match.group(1).lower().startswith("http"):
+            label, url = match.group(1).strip(), match.group(2).strip()
+        else:
+            label, url = f"Link {len(links) + 1}", line
+        while label in links:
+            label += " (2)"
+        links[label] = url
+    return links
+
+
+def build_application_embed(
+        artist: dict[str, Any],
+        member: discord.Member | None,
+        *,
         status: str = "PENDING",
-        mod: discord.Member | None = None
+        moderator: discord.abc.User | None = None
 ) -> discord.Embed:
     status_colors = {
         "PENDING": discord.Color.orange(),
@@ -621,46 +658,44 @@ def _build_application_embed(
         "REJECTED": discord.Color.red()
     }
 
-    avatar_url = member.display_avatar.url if isinstance(member, discord.Member) else None
-
     embed = discord.Embed(
-        title=f"Artist Application – {application['display_name']}",
+        title=f"Artist Application – {artist['display_name']}",
         color=status_colors.get(status, discord.Color.orange()),
     )
-    if avatar_url:
-        embed.set_thumbnail(url=avatar_url)
+    if member is not None:
+        embed.set_thumbnail(url=member.display_avatar.url)
 
-    embed.add_field(name="Discord", value=f"<@{application['discord_user_id']}>", inline=True)
-    embed.add_field(name="Username", value=application.get("discord_username", "–"), inline=True)
+    price_min = artist.get("price_min_php")
+    price_max = artist.get("price_max_php")
+    socials = "\n".join(
+        f"{label}: {url}" for label, url in (artist.get("social_links") or {}).items()
+    )
+
+    embed.add_field(name="Discord", value=f"<@{artist['discord_user_id']}>", inline=True)
+    embed.add_field(name="Username", value=str(member) if member else "–", inline=True)
     embed.add_field(name="Status", value=status, inline=True)
     embed.add_field(
-        name="Styles", value=", ".join(application.get("styles", []) or "–"), inline=False
+        name="Styles", value=", ".join(artist.get("styles") or []) or "–", inline=False
     )
     embed.add_field(
         name="Price Range",
         value=(
-            f"₱{application.get('price_min_php', '?')} – ₱{application.get('price_max_php', '?')}"
+            f"₱{price_min if price_min is not None else '?'} – "
+            f"₱{price_max if price_max is not None else '?'}"
         ),
         inline=True
     )
-    embed.add_field(
-        name="GCash", value=application.get("gcash_number" or "–"), inline=True
-    )
-    embed.add_field(
-        name="PayPal", value=application.get("paypal_email" or "–"), inline=True
-    )
-    embed.add_field(
-        name="Social Links",
-        value=application.get("social_links_raw", "–"),
-        inline=False
-    )
+    embed.add_field(name="GCash", value=artist.get("gcash_number") or "–", inline=True)
+    embed.add_field(name="PayPal", value=artist.get("paypal_email") or "–", inline=True)
+    embed.add_field(name="Social Links", value=socials[:1024] or "–", inline=False)
 
-    if mod:
-        embed.set_footer(text=f"Decision by {mod} ({status})")
+    if moderator:
+        embed.set_footer(text=f"Decision by {moderator} ({status})")
 
     return embed
 
 
 async def setup(bot: commands.Bot) -> None:
-    cog = ArtistCog(bot)
-    await bot.add_cog(cog)
+    await bot.add_cog(ArtistCog(bot))
+    # Persistent: these buttons keep working after a restart.
+    bot.add_dynamic_items(ApproveApplicationButton, RejectApplicationButton)

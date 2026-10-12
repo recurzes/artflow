@@ -22,6 +22,7 @@ class ArtistStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
     INACTIVE = "INACTIVE"
+    REJECTED = "REJECTED"
 
 class Artist(Base, TimestampMixin):
     __tablename__ = "artists"
@@ -104,6 +105,15 @@ class Artist(Base, TimestampMixin):
     verified_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id"),
+        nullable=True
+    )
+    # Set when an application is turned down; the applicant may reapply later
+    rejected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+    rejection_reason: Mapped[str | None] = mapped_column(
+        Text,
         nullable=True
     )
     # Gcash

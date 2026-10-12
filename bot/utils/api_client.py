@@ -170,8 +170,38 @@ class APIClient:
             params={"server_id": str(server_id)},
         )
 
-    async def create_artist(self, **fields: Any) -> Json:
-        return await self._request("POST", "/artists", json=fields)
+    async def apply_as_artist(
+            self,
+            *,
+            guild_id: int | str,
+            discord_user_id: int | str,
+            account_created_at: str | None = None,
+            **application: Any
+    ) -> Json:
+        return await self._request(
+            "POST",
+            "/artists/applications",
+            json={
+                "discord_guild_id": str(guild_id),
+                "discord_user_id": str(discord_user_id),
+                "discord_account_created_at": account_created_at,
+                **application,
+            },
+        )
+
+    async def approve_artist(self, artist_id: str, *, moderator: int | str) -> Json:
+        return await self._request(
+            "POST",
+            f"/artists/{artist_id}/approve",
+            json={"moderator_discord_user_id": str(moderator)},
+        )
+
+    async def reject_artist(self, artist_id: str, *, moderator: int | str, reason: str) -> Json:
+        return await self._request(
+            "POST",
+            f"/artists/{artist_id}/reject",
+            json={"moderator_discord_user_id": str(moderator), "reason": reason},
+        )
 
     async def update_artist(self, artist_id: str, **fields: Any) -> Json:
         return await self._request("PATCH", f"/artists/{artist_id}", json=fields)

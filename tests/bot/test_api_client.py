@@ -22,17 +22,23 @@ async def _setup(api: APIClient) -> tuple[dict, dict, dict, dict]:
     """A server, an artist (with TOS) and a client."""
     guild_id = make_discord_id()
     server = await api.register_server(guild_id, "Art Hub", {"channel_reviews": "111"})
-    artist_user = await api.upsert_user(make_discord_id(), account_created_at=_created(500))
+    artist_discord_id = make_discord_id()
     buyer = await api.upsert_user(make_discord_id())
-    artist = await api.create_artist(
-        user_id=artist_user["id"],
-        server_id=server["id"],
+    application = await api.apply_as_artist(
+        guild_id=guild_id,
+        discord_user_id=artist_discord_id,
+        account_created_at=_created(500),
         display_name="Mika",
         styles=["anime", "chibi"],
+        social_links={"Twitter": "https://x.com/mika"},
         price_min_php=500,
         price_max_php=3000,
         gcash_number="09171234567",
     )
+    assert application["status"] == "PENDING"
+    artist = await api.approve_artist(application["id"], moderator=make_discord_id())
+    assert artist["status"] == "ACTIVE"
+    artist_user = await api.get_user(artist_discord_id)
     artist = await api.update_artist(artist["id"], tos_text=TOS)
     return server, artist_user, buyer, artist
 
@@ -81,6 +87,17 @@ async def test_artists(bot_api):
     assert await bot_api.list_artists(server["id"], nsfw_only=True) == []
 
     assert await bot_api.get_artist_capacity(artist["id"]) == {"count": 0, "max": 5}
+
+    # A second applicant is turned down.
+    other = await bot_api.apply_as_artist(
+        guild_id=server["discord_guild_id"],
+        discord_user_id=make_discord_id(),
+        display_name="Rin",
+    )
+    rejected = await bot_api.reject_artist(
+        other["id"], moderator=make_discord_id(), reason="Portfolio links are broken"
+    )
+    assert rejected["status"] == "REJECTED"
 
 
 async def test_commission_lifecycle_disputes_and_admin(bot_api):

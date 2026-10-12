@@ -1,28 +1,34 @@
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from shared.models.artist import ArtistStatus
 from shared.schemas.common import TimestampSchema
 
 
-class ArtistCreate(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class ArtistApplication(BaseModel):
+    """What a member submits with /artist-apply."""
 
-    user_id: uuid.UUID
-    server_id: uuid.UUID
-    display_name: str
-    bio: str | None = None
+    discord_guild_id: str = Field(min_length=1, max_length=20)
+    discord_user_id: str = Field(min_length=1, max_length=20)
+    discord_account_created_at: datetime | None = None
+    display_name: str = Field(min_length=1, max_length=100)
     styles: list[str] = []
     social_links: dict[str, str] = {}
-    portfolio_images: list[str] = []
     price_min_php: Decimal | None = None
     price_max_php: Decimal | None = None
-    nsfw_enabled: bool = False
-    max_active_commissions: int = 5
-    gcash_number: str | None = None
-    paypal_email: str | None = None
+    gcash_number: str | None = Field(default=None, max_length=20)
+    paypal_email: str | None = Field(default=None, max_length=255)
+
+
+class ArtistApproval(BaseModel):
+    moderator_discord_user_id: str = Field(min_length=1, max_length=20)
+
+
+class ArtistRejection(ArtistApproval):
+    reason: str = Field(min_length=1, max_length=1000)
 
 
 class ArtistUpdate(BaseModel):

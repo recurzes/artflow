@@ -29,18 +29,21 @@ class Scene:
             {"discord_guild_id": make_discord_id(), "name": "Art Hub"},
             expect=201,
         )
-        self.artist_user = await self.post("/users", {"discord_user_id": make_discord_id()})
         self.buyer = await self.post("/users", {"discord_user_id": make_discord_id()})
-        self.artist = await self.post(
-            "/artists",
+        application = await self.post(
+            "/artists/applications",
             {
-                "user_id": self.artist_user["id"],
-                "server_id": self.server["id"],
+                "discord_guild_id": self.server["discord_guild_id"],
+                "discord_user_id": make_discord_id(),
                 "display_name": "Mika",
                 "styles": ["anime"],
                 "gcash_number": "09171234567",
             },
             expect=201,
+        )
+        self.artist = await self.post(
+            f"/artists/{application['id']}/approve",
+            {"moderator_discord_user_id": make_discord_id()},
         )
         response = await self.client.patch(
             f"/artists/{self.artist['id']}", json={"tos_text": TOS}

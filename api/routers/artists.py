@@ -7,10 +7,12 @@ from api.dependencies import BotAuth, DBSession
 from api.services import artist_service
 from shared.models.artist import Artist
 from shared.schemas.artist import (
+    ArtistApplication,
+    ArtistApproval,
     ArtistCommissionCapacity,
-    ArtistCreate,
     ArtistListItem,
     ArtistRead,
+    ArtistRejection,
     ArtistUpdate,
 )
 
@@ -51,13 +53,17 @@ async def list_artists(
         for a in artists
     ]
 
-@router.post("", response_model=ArtistRead, status_code=status.HTTP_201_CREATED)
-async def create_artist(
-        body: ArtistCreate,
+@router.post(
+    "/applications",
+    response_model=ArtistRead,
+    status_code=status.HTTP_201_CREATED
+)
+async def apply_as_artist(
+        body: ArtistApplication,
         db: DBSession,
         _auth: BotAuth
 ) -> ArtistRead:
-    artist = await artist_service.create_artist(db, body)
+    artist = await artist_service.apply(db, body)
     return _artist_to_read(artist)
 
 @router.get("/by-discord/{discord_user_id}", response_model=ArtistRead)
@@ -87,6 +93,31 @@ async def active_commission_count(
 ) -> ArtistCommissionCapacity:
     count, max_commissions = await artist_service.get_artist_commission_capacity(db, artist_id)
     return ArtistCommissionCapacity(count=count, max=max_commissions)
+
+@router.post("/{artist_id}/approve", response_model=ArtistRead)
+async def approve_artist(
+        artist_id: uuid.UUID,
+        body: ArtistApproval,
+        db: DBSession,
+        _auth: BotAuth
+) -> ArtistRead:
+    artist = await artist_service.approve(db, artist_id, body.moderator_discord_user_id)
+    return _artist_to_read(artist)
+
+@router.post("/{artist_id}/reject", response_model=ArtistRead)
+async def reject_artist(
+        artist_id: uuid.UUID,
+        body: ArtistRejection,
+        db: DBSession,
+        _auth: BotAuth
+) -> ArtistRead:
+    artist = await artist_service.reject(
+        db,
+        artist_id,
+        body.moderator_discord_user_id,
+        body.reason
+    )
+    return _artist_to_read(artist)
 
 @router.patch("/{artist_id}", response_model=ArtistRead)
 async def update_artist(
