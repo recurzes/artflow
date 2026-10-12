@@ -71,14 +71,15 @@ async def submit_18_verification(
         db: AsyncSession,
         redis: Redis,
         body: Verify18Submit
-) -> tuple[str, str | None]:
+) -> tuple[str, str | None, bool]:
+    """Returns (status, detail, newly_queued)."""
     user = await upsert_user(
         db,
         discord_user_id=body.discord_user_id,
         discord_account_created_at=body.discord_account_created_at
     )
     if user.is_18_verified:
-        return "already_verified", None
+        return "already_verified", None, False
 
     pending_key = f"{_AGE_VERIFY_PENDING_PREFIX}{body.discord_user_id}"
     age_days = _account_age_days(user.discord_account_created_at)
@@ -87,12 +88,14 @@ async def submit_18_verification(
         user.is_18_verified_at = _utcnow()
         await db.flush()
         await redis.delete(pending_key)
-        return "approved", None
+        return "approved", None, False
 
-    await redis.setex(pending_key, _PENDING_TTL_SEC, "1")
+    # SET NX: only the first request while one is pending reports newly_queued.
+    newly_queued = bool(await redis.set(pending_key, "1", ex=_PENDING_TTL_SEC, nx=True))
     return (
         "pending_mod",
-        f"Accounts younger than {MIN_DISCORD_ACCOUNT_AGE_DAYS} days are reviewed by a moderator"
+        f"Accounts younger than {MIN_DISCORD_ACCOUNT_AGE_DAYS} days are reviewed by a moderator",
+        newly_queued
     )
 
 

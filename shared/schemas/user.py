@@ -31,6 +31,9 @@ class Verify18Submit(BaseModel):
 class Verify18Response(BaseModel):
     status: Literal["approved", "pending_mod", "already_verified"]
     detail: str | None = None
+    # True the first time a pending request is recorded, False when the member
+    # asks again while still waiting. The bot notifies moderators only once.
+    newly_queued: bool = False
 
 
 class Verify18ApproveBody(BaseModel):

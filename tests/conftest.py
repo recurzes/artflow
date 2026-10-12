@@ -160,7 +160,7 @@ def mock_redis():
     """Return a simple AsyncMock that mimics the redis.asyncio.Redis interface."""
     redis = AsyncMock()
     redis.get = AsyncMock(return_value=None)
-    redis.set = AsyncMock()
+    redis.set = AsyncMock(return_value=True)
     redis.setex = AsyncMock()
     redis.delete = AsyncMock()
     return redis

@@ -123,8 +123,21 @@ class TestAgeVerification:
         assert response.status_code == 200, response.text
         assert response.json()["status"] == "pending_mod"
         assert "moderator" in response.json()["detail"]
-        mock_redis.setex.assert_called_once()
+        assert response.json()["newly_queued"] is True
         assert (await client.get(f"/users/{discord_id}")).json()["is_18_verified"] is False
+
+    async def test_asking_again_while_pending_is_not_queued_twice(self, client, mock_redis):
+        body = {
+            "discord_user_id": make_discord_id(),
+            "discord_account_created_at": self._account_created(10),
+        }
+        first = await client.post("/users/verify-18/submit", json=body)
+        mock_redis.set.return_value = None  # what SET NX returns when the key exists
+        second = await client.post("/users/verify-18/submit", json=body)
+
+        assert first.json()["newly_queued"] is True
+        assert second.json()["status"] == "pending_mod"
+        assert second.json()["newly_queued"] is False
 
     async def test_moderator_approval(self, client, mock_redis):
         discord_id = make_discord_id()
