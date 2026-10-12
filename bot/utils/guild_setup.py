@@ -26,6 +26,8 @@ from shared.discord_layout import (
     SHOWCASE_CHANNEL_NAMES,
 )
 
+STAFF_ONLY_CHANNELS: tuple[str, ...] = (CHANNEL_VERIFICATION_QUEUE, CHANNEL_ADMIN_LOGS)
+
 
 def _overwrite_bot_send(guild: discord.Guild) -> dict[Any, discord.PermissionOverwrite]:
     me = guild.me
@@ -47,11 +49,7 @@ def _staff_only_overwrites(
 ) -> dict[Any, discord.PermissionOverwrite]:
     everyone = guild.default_role
     base: dict[Any, discord.PermissionOverwrite] = {
-        everyone: discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=False,
-            read_message_history=True
-        ),
+        everyone: discord.PermissionOverwrite(view_channel=False),
         mod_role: discord.PermissionOverwrite(
             view_channel=True,
             send_messages=True,
@@ -110,6 +108,23 @@ async def _ensure_text_channel(
     if overwrites is not None:
         kwargs["overwrites"] = overwrites
     return await guild.create_text_channel(name, **kwargs)
+
+async def repair_staff_channels(guild: discord.Guild) -> list[str]:
+    """Re-apply staff-only overwrites to staff channels that already exist.
+
+    Servers provisioned before these channels were hidden from @everyone keep
+    their old overwrites until this runs.
+    """
+    mod_role = await _ensure_role(guild, ROLE_MODERATOR)
+    overwrites = _staff_only_overwrites(guild, mod_role)
+    repaired: list[str] = []
+    for name in STAFF_ONLY_CHANNELS:
+        channel = discord.utils.get(guild.text_channels, name=name)
+        if channel is None:
+            continue
+        await channel.edit(overwrites=overwrites, reason="ArtFlow: restrict staff channel")
+        repaired.append(name)
+    return repaired
 
 async def provision_artflow_guild(guild: discord.Guild) -> dict[str, str]:
     role_unverified = await _ensure_role(guild, ROLE_UNVERIFIED)
