@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
-from shared.schemas.common import TimestampSchema
+from api.common import TimestampSchema
 
 
 class UserCreate(BaseModel):

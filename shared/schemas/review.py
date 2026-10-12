@@ -2,7 +2,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from shared.schemas.common import TimestampSchema
+from api.common import TimestampSchema
 
 
 class ReviewCreate(BaseModel):

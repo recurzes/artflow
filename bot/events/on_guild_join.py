@@ -4,7 +4,6 @@ import discord
 from discord.ext import commands
 
 from bot.utils.guild_setup import provision_artflow_guild
-from shared.schemas.server import ServerSettings
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +19,9 @@ class GuildJoinEvents(commands.Cog):
                 await self.bot.api.rename_server(guild.id, guild.name)
                 return
 
+            # Only the IDs that were just created; the API fills in every default.
             provisioned = await provision_artflow_guild(guild)
-            merged = ServerSettings().model_dump()
-            merged.update(provisioned)
-            settings = ServerSettings.model_validate(merged)
-            await self.bot.api.register_server(guild.id, guild.name, settings.model_dump())
+            await self.bot.api.register_server(guild.id, guild.name, provisioned)
             logger.info("Provisioned ArtFlow structure for guild %s (%s)", guild.name, guild.id)
         except Exception as exc:
             logger.error(
