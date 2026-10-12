@@ -13,7 +13,7 @@ from bot.utils.audit_log import format_commission_snapshot, post_admin_log
 from bot.utils.embeds import base_embed
 from bot.utils.permissions import is_staff
 from bot.utils.replies import reply_error, reply_success
-from bot.utils.tickets import TicketError, ticket_commission
+from bot.utils.tickets import TicketError, close_ticket, ticket_commission
 from shared.discord_layout import ROLE_MODERATOR
 
 logger = logging.getLogger(__name__)
@@ -79,6 +79,8 @@ async def resolve_dispute_flow(
     )
     if outcome == "COMPLETED":
         await announce_completed(api, interaction.guild, interaction.channel, comm)
+    else:
+        await close_ticket(interaction.channel)
 
     await reply_success(interaction, "Dispute resolved")
     return True

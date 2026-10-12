@@ -36,10 +36,19 @@ def make_channel(channel_id: int = 5001) -> MagicMock:
     channel = MagicMock(spec=discord.TextChannel)
     channel.id = channel_id
     channel.mention = f"<#{channel_id}>"
+    channel.name = f"cm-ticket-{channel_id}"
+    channel.overwrites = {}
     channel.send = AsyncMock()
     channel.delete = AsyncMock()
     channel.edit = AsyncMock()
     return channel
+
+
+def make_category(name: str, *, channels: int = 0) -> MagicMock:
+    category = MagicMock(spec=discord.CategoryChannel)
+    category.name = name
+    category.channels = [object()] * channels
+    return category
 
 
 def make_guild(*members: MagicMock, guild_id: int = 9001) -> MagicMock:
@@ -53,6 +62,16 @@ def make_guild(*members: MagicMock, guild_id: int = 9001) -> MagicMock:
     guild.channels = []
     guild.text_channels = []
     guild.categories = []
+    guild.default_role = MagicMock(spec=discord.Role)
+    guild.me = make_member(999, name="artflow") if members else None
+
+    async def _create_category(name: str, **_: object) -> MagicMock:
+        category = make_category(name)
+        guild.categories.append(category)
+        return category
+
+    guild.create_category = AsyncMock(side_effect=_create_category)
+    guild.create_text_channel = AsyncMock(side_effect=lambda **_: make_channel())
     return guild
 
 
@@ -69,6 +88,8 @@ def make_interaction(
     interaction.user = user
     interaction.guild = guild
     interaction.channel = channel
+    if channel is not None and guild is not None:
+        channel.guild = guild
     interaction.channel_id = channel.id if channel is not None else None
     interaction.message = MagicMock(spec=discord.Message)
     interaction.message.edit = AsyncMock()
