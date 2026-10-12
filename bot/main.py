@@ -117,8 +117,12 @@ class ArtflowBot(commands.AutoShardedBot):
 
 
 async def main() -> None:
-    if not settings.discord_token or settings.discord_token == "your_discord_bot_token_here":
-        logger.error("DISCORD_TOKEN is not set. Set it in .env before running the bot")
+    try:
+        settings.require("discord_token", "bot_secret")
+        if settings.discord_token == "your_discord_bot_token_here":
+            raise RuntimeError("DISCORD_TOKEN still has its placeholder value from .env.example")
+    except RuntimeError as exc:
+        logger.error("%s", exc)
         sys.exit(1)
 
     bot = ArtflowBot()

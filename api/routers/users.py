@@ -14,9 +14,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_200_OK)
-@limiter.limit("10/minute")
 async def upsert_user(
-        request: Request,
         body: UserCreate,
         db: DBSession,
         _auth: BotAuth,
@@ -59,9 +57,7 @@ async def verify_email(
 
 
 @router.get("/{discord_user_id}", response_model=UserRead)
-@limiter.limit("30/minute")
 async def get_user(
-        request: Request,
         db: DBSession,
         _auth: BotAuth,
         discord_user_id: str,

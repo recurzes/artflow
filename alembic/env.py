@@ -5,7 +5,7 @@ from sqlalchemy.engine import Connection
 
 import shared.models
 from alembic import context
-from shared.db import engine
+from shared.db import get_engine
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -21,7 +21,7 @@ target_metadata = shared.models.Base.metadata
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
-    url = engine.url.render_as_string(hide_password=False)
+    url = get_engine().url.render_as_string(hide_password=False)
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -45,7 +45,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_migrations_online() -> None:
     """Run migrations in 'online' mode using the async engine."""
-    async with engine.connect() as connection:
+    async with get_engine().connect() as connection:
         await connection.run_sync(do_run_migrations)
 
 
