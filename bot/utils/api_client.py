@@ -327,6 +327,19 @@ class APIClient:
             json={"reviewer_id": reviewer_id, "rating": rating, "body": body, "is_public": True},
         )
 
+    # ------------------------------------------------------------------- sweeps
+    async def sweep_expire_unpaid(self) -> list[Json]:
+        """Cancel unpaid commissions past their deadline; returns the ones cancelled."""
+        return await self._request("POST", "/commissions/sweeps/expire-unpaid")
+
+    async def sweep_auto_accept(self) -> list[Json]:
+        """Complete deliveries nobody responded to; returns the ones completed."""
+        return await self._request("POST", "/commissions/sweeps/auto-accept")
+
+    async def sweep_payment_reminders(self) -> list[Json]:
+        """Commissions whose payment deadline is near; each is returned only once."""
+        return await self._request("POST", "/commissions/sweeps/payment-reminders")
+
     # ----------------------------------------------------------------- disputes
     async def open_dispute(
             self,

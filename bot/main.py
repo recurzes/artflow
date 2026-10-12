@@ -38,6 +38,7 @@ COGS: list[str] = [
     "bot.cogs.artist",
     "bot.cogs.commission",
     "bot.cogs.dispute",
+    "bot.cogs.sweeps",
     "bot.cogs.admin"
 ]
 

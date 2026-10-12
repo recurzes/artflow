@@ -440,64 +440,86 @@ async def cancel_commission(db: AsyncSession, commission_id: uuid.UUID) -> Commi
     return comm
 
 
-# Timers — called by the scheduled sweeps
+# Scheduled sweeps
+#
+# Each returns the commissions it acted on, so the caller can tell the people
+# involved. They are safe to run as often as you like and from more than one
+# place: every commission is re-checked under a row lock before it is changed.
 
-async def cancel_commission_unpaid(
-        db: AsyncSession,
-        commission_id: uuid.UUID
-) -> Commission | None:
-    """Cancel a commission whose payment window has passed. Returns None when the
-    commission no longer qualifies (paid, already cancelled, deadline moved)."""
-    comm = await get_commission_for_update(db, commission_id)
-    if comm.status != CommissionStatus.PAYMENT_PENDING:
-        return None
-    if comm.payment_deadline_at is None or comm.payment_deadline_at > _utcnow():
-        return None
-    mark_cancelled(comm)
-    await db.flush()
-    return comm
+PAYMENT_REMINDER_WINDOW = timedelta(hours=12)
 
 
-async def list_payment_overdue_ids(db: AsyncSession) -> list[uuid.UUID]:
-    now = _utcnow()
-    result = await db.execute(
+async def expire_unpaid(db: AsyncSession) -> list[Commission]:
+    """Cancel commissions whose payment window passed with no receipt uploaded.
+
+    A commission with a receipt is left alone even when the artist has not
+    confirmed it: the client may have paid, and that is a dispute, not a lapse.
+    """
+    overdue = await db.scalars(
         select(Commission.id).where(
             Commission.status == CommissionStatus.PAYMENT_PENDING,
-            Commission.payment_deadline_at.is_not(None),
-            Commission.payment_deadline_at < now
+            Commission.payment_deadline_at < _utcnow(),
+            Commission.payment_receipt_key.is_(None),
         )
     )
-    return [row[0] for row in result.all()]
+    cancelled: list[Commission] = []
+    for commission_id in overdue.all():
+        comm = await get_commission_for_update(db, commission_id)
+        if (
+            comm.status != CommissionStatus.PAYMENT_PENDING
+            or comm.payment_receipt_key is not None
+            or comm.payment_deadline_at is None
+            or comm.payment_deadline_at > _utcnow()
+        ):
+            continue  # changed since it was selected
+        mark_cancelled(comm)
+        cancelled.append(comm)
+    await db.flush()
+    return cancelled
 
 
-async def list_delivery_auto_accept_ids(db: AsyncSession) -> list[uuid.UUID]:
-    now = _utcnow()
-    result = await db.execute(
+async def auto_accept_deliveries(db: AsyncSession) -> list[Commission]:
+    """Complete deliveries the client neither accepted nor disputed in time."""
+    due = await db.scalars(
         select(Commission.id).where(
             Commission.status == CommissionStatus.DELIVERED,
-            Commission.delivery_auto_accept_at.is_not(None),
-            Commission.delivery_auto_accept_at < now,
+            Commission.delivery_auto_accept_at < _utcnow(),
         )
     )
-    return [row[0] for row in result.all()]
-
-
-async def list_payment_reminder_candidates(db: AsyncSession) -> list[Commission]:
-    now = _utcnow()
-    window_end = now + timedelta(hours=12)
-    result = await db.execute(
-        select(Commission).options(*_WITH_PARTIES).where(
-            Commission.status == CommissionStatus.PAYMENT_PENDING,
-            Commission.payment_deadline_at.is_not(None),
-            Commission.payment_reminder_sent.is_(False),
-            Commission.payment_deadline_at > now,
-            Commission.payment_deadline_at <= window_end,
-        )
-    )
-    return list(result.scalars().all())
-
-
-async def mark_payment_reminder_sent(db: AsyncSession, commission_id: uuid.UUID) -> None:
-    comm = await get_commission_for_update(db, commission_id)
-    comm.payment_reminder_sent = True
+    completed: list[Commission] = []
+    for commission_id in due.all():
+        comm = await get_commission_for_update(db, commission_id)
+        if (
+            comm.status != CommissionStatus.DELIVERED
+            or comm.delivery_auto_accept_at is None
+            or comm.delivery_auto_accept_at > _utcnow()
+        ):
+            continue
+        mark_completed(comm)
+        completed.append(comm)
     await db.flush()
+    return completed
+
+
+async def take_payment_reminders(db: AsyncSession) -> list[Commission]:
+    """Commissions whose payment deadline is near and that have not been
+    reminded yet. They are marked as reminded here, so each is returned once."""
+    now = _utcnow()
+    due = await db.scalars(
+        select(Commission.id).where(
+            Commission.status == CommissionStatus.PAYMENT_PENDING,
+            Commission.payment_reminder_sent.is_(False),
+            Commission.payment_receipt_key.is_(None),
+            Commission.payment_deadline_at > now,
+            Commission.payment_deadline_at <= now + PAYMENT_REMINDER_WINDOW,
+        )
+    )
+    reminded: list[Commission] = []
+    for commission_id in due.all():
+        comm = await get_commission_for_update(db, commission_id)
+        if comm.status != CommissionStatus.PAYMENT_PENDING or comm.payment_reminder_sent:
+            continue
+        comm.payment_reminder_sent = True
+        reminded.append(comm)
+    await db.flush()
+    return reminded

@@ -77,12 +77,5 @@ services:
       redis:
         condition: service_healthy
 
-  beat:
-    <<: *app
-    command: celery -A workers.celery_app beat --loglevel=info
-    depends_on:
-      redis:
-        condition: service_healthy
-
 volumes:
   postgres_data:
