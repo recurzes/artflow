@@ -63,12 +63,7 @@ async def test_commit_happens_before_the_response_is_sent(session_factory):
         ) as ac:
             response = await ac.post(
                 "/users",
-                json={
-                    "id": str(uuid.uuid4()),
-                    "discord_user_id": make_discord_id(),
-                    "created_at": "2024-01-01T00:00:00Z",
-                    "updated_at": "2024-01-01T00:00:00Z",
-                },
+                json={"discord_user_id": make_discord_id()},
             )
     finally:
         app.dependency_overrides.clear()

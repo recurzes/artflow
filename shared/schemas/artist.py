@@ -60,6 +60,8 @@ class ArtistRead(TimestampSchema):
     rating_count: int
     status: ArtistStatus
     tos_text: str | None
+    # SHA-256 of tos_text; a client accepts a specific version of the terms
+    tos_hash: str | None
     gcash_number: str | None
     paypal_email: str | None
 

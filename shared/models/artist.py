@@ -73,7 +73,7 @@ class Artist(Base, TimestampMixin):
         default=False,
         nullable=False
     )
-    max_active_commission: Mapped[int] = mapped_column(
+    max_active_commissions: Mapped[int] = mapped_column(
         Integer,
         default=5,
         nullable=False

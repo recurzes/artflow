@@ -1,6 +1,5 @@
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 import discord
@@ -15,13 +14,9 @@ from shared.redis import get_redis
 logger = logging.getLogger(__name__)
 
 def _user_create_json(member: discord.Member) -> dict[str, Any]:
-    placeholder_ts = datetime.now(timezone.utc).isoformat()
     return {
-        "id": str(uuid.uuid4()),
         "discord_user_id": str(member.id),
         "is_phone_verified": bool(getattr(member.public_flags, "verified_phone", False)),
-        "created_at": placeholder_ts,
-        "updated_at": placeholder_ts,
         "discord_account_created_at": member.created_at.isoformat()
     }
 
