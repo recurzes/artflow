@@ -17,8 +17,9 @@ celery_app = Celery(
     "artflow",
     broker=settings.redis_url,
     backend=settings.redis_url,
+    # Commission timers are not Celery tasks: the bot runs them on a schedule
+    # (bot/cogs/sweeps.py), because only the bot can post the result in a ticket.
     include=[
-        "workers.notifications",
         "workers.images"
     ],
 )

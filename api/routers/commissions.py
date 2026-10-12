@@ -39,6 +39,24 @@ async def get_commission_by_discord_channel(
     )
     return CommissionRead.model_validate(comm)
 
+# Scheduled sweeps. Each changes what is due and returns it, so the bot can
+# announce it in the ticket.
+
+@router.post("/sweeps/expire-unpaid", response_model=list[CommissionRead])
+async def sweep_expire_unpaid(db: DBSession, _auth: BotAuth) -> list[CommissionRead]:
+    commissions = await commission_service.expire_unpaid(db)
+    return [CommissionRead.model_validate(c) for c in commissions]
+
+@router.post("/sweeps/auto-accept", response_model=list[CommissionRead])
+async def sweep_auto_accept(db: DBSession, _auth: BotAuth) -> list[CommissionRead]:
+    commissions = await commission_service.auto_accept_deliveries(db)
+    return [CommissionRead.model_validate(c) for c in commissions]
+
+@router.post("/sweeps/payment-reminders", response_model=list[CommissionRead])
+async def sweep_payment_reminders(db: DBSession, _auth: BotAuth) -> list[CommissionRead]:
+    commissions = await commission_service.take_payment_reminders(db)
+    return [CommissionRead.model_validate(c) for c in commissions]
+
 @router.post("", response_model=CommissionRead, status_code=status.HTTP_201_CREATED)
 async def create_commission(
         body: CommissionCreate,
