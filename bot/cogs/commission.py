@@ -12,8 +12,15 @@ import discord
 from discord import Interaction, app_commands
 from discord.ext import commands
 
-from bot.utils.embeds import base_embed, error_embed, success_embed, payment_instructions_embed, completed_work_embed, \
-    warning_embed, public_review_embed
+from bot.utils.embeds import (
+    base_embed,
+    completed_work_embed,
+    error_embed,
+    payment_instructions_embed,
+    public_review_embed,
+    success_embed,
+    warning_embed,
+)
 from bot.utils.tickets import create_commission_ticket
 from shared.exchange_rates import php_to_usd
 from shared.storage import upload_delivery_file, upload_receipt, upload_wip_image
@@ -117,7 +124,7 @@ async def _tos_accept_core(
         h = _tos_hash(artist["tos_text"])
         comm = await bot.api.post(
             f"/commissions/{comm['id']}/tos-accept",
-            json={"tos_version_hash"}
+            json={"tos_version_hash": h}
         )
         await _post_payment_instructions_embed(bot, channel, comm, artist)
         return True, ""
@@ -506,7 +513,7 @@ class ArtistPickView(discord.ui.View):
                 value=a["id"],
                 description=", ".join(a["styles"][:3])[:100] if a.get("styles") else None
             )
-            for a in artists[:25]
+            for a in page_artists
         ]
 
         self.select = discord.ui.Select(placeholder="Choose an artist...", options=options)
@@ -668,7 +675,10 @@ class CommissionCog(commands.Cog, name="Commissions"):
         description="Start a new commission request (choose an artist)",
     )
     @app_commands.describe(
-        nsfw_only="Show only artists who accept NSFW (requires 18+ verification to open NSFW tickets)",
+        nsfw_only=(
+            "Show only artists who accept NSFW "
+            "(requires 18+ verification to open NSFW tickets)"
+        ),
         nsfw="Open an NSFW ticket (client must be 18+ verified; artist must allow NSFW)",
         style="Filter by style (substring match)"
     )

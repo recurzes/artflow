@@ -1,7 +1,7 @@
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, status
 from redis.asyncio import Redis
 from slowapi import Limiter
 from sqlalchemy.ext.asyncio import AsyncSession

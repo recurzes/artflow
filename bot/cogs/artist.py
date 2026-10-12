@@ -84,9 +84,9 @@ class ArtistApplyModal(discord.ui.Modal, title="ArtFlow — Artist Application")
             await redis.aclose()
 
         social_lines = [
-            l.strip()
-            for l in self.social_links.value.splitlines()
-            if l.strip()
+            line.strip()
+            for line in self.social_links.value.splitlines()
+            if line.strip()
         ]
         if len(social_lines) < 2:
             await interaction.followup.send(
@@ -541,7 +541,7 @@ class ArtistCog(commands.Cog, name="Artists"):
         )
         if artist_row is None:
             await interaction.followup.send(
-                embed=error_embed(f"Not an artist: You are not registered on this server"),
+                embed=error_embed("Not an artist: You are not registered on this server"),
                 ephemeral=True
             )
             return
@@ -571,7 +571,11 @@ class ArtistCog(commands.Cog, name="Artists"):
 
 
 
-    async def _set_commission_status(self, interaction: discord.Interaction, open_status: bool) -> None:
+    async def _set_commission_status(
+            self,
+            interaction: discord.Interaction,
+            open_status: bool
+    ) -> None:
         status_label = "OPEN" if open_status else "CLOSED"
 
         try:

@@ -30,7 +30,7 @@ class AgeGateModal(discord.ui.Modal, title="18+ verification"):
         if (self.ack.value or "").strip().upper() != "I_AM_18":
             await interaction.response.send_message(
                 embed=error_embed(
-                    f"Confirmation required: You must type exactly: I_AM_18"
+                    "Confirmation required: You must type exactly: I_AM_18"
                 ),
                 ephemeral=True
             )
@@ -141,8 +141,9 @@ class AgeVerificationCog(commands.Cog, name="Age verification"):
             embed=base_embed(
                 title="18+ access",
                 description=(
-                    "Request access to view NSFW artist listings and open NSFW commissions"
-                    "Accounts 90+ days old are approved automatically; newer accounts are reviewed by mods"
+                    "Request access to view NSFW artist listings and open NSFW commissions. "
+                    "Accounts 90+ days old are approved automatically; "
+                    "newer accounts are reviewed by mods."
                 )
             ),
             view=AgeRequestView()

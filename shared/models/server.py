@@ -1,12 +1,17 @@
 import enum
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.models.base import Base, TimestampMixin, uuid_pk
+
+if TYPE_CHECKING:
+    from shared.models.artist import Artist
+    from shared.models.commission import Commission
 
 
 class SubscriptionTier(str, enum.Enum):

@@ -5,6 +5,7 @@ from api.services import server_service
 from shared.models.server import Server
 from shared.schemas.server import (
     ServerCreate,
+    ServerPatch,
     ServerRead,
     ServerSettings,
 )
@@ -47,17 +48,7 @@ async def get_server(
 @router.patch("/{guild_id}/settings", response_model=ServerRead)
 async def patch_server(
         guild_id: str,
-        db: DBSession,
-        _auth: BotAuth
-) -> ServerRead:
-    server = await server_service.patch_server(db, guild_id, body)
-    if server is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Server not found")
-    return _server_to_read(server)
-
-@router.patch("/{guild_id}/settings", response_model=ServerRead)
-async def patch_server_settings(
-        guild_id: str,
+        body: ServerPatch,
         db: DBSession,
         _auth: BotAuth
 ) -> ServerRead:

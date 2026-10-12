@@ -13,6 +13,7 @@ __all__ = [
     "SubscriptionTier",
     "User",
     "Artist",
+    "ArtistStatus",
     "Commission",
     "CommissionStatus",
     "PaymentMethod",
@@ -20,5 +21,5 @@ __all__ = [
     "WipUpdate",
     "Review",
     "Dispute",
-    DisputeStatus
+    "DisputeStatus",
 ]

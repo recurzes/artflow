@@ -1,13 +1,20 @@
 import enum
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.models.base import Base, TimestampMixin, uuid_pk
-from shared.models.server import Server
+
+if TYPE_CHECKING:
+    from shared.models.commission import Commission
+    from shared.models.review import Review
+    from shared.models.server import Server
+    from shared.models.user import User
+    from shared.models.wip_update import WipUpdate
 
 
 class ArtistStatus(str, enum.Enum):
