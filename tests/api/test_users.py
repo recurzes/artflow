@@ -2,6 +2,7 @@
 Tests for the /users router.
 """
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from tests.conftest import make_discord_id
 
@@ -80,4 +81,69 @@ class TestGetUser:
     async def test_unknown_user_returns_404(self, client):
         """A discord_user_id that doesn't exist should return 404."""
         response = await client.get(f"/users/{make_discord_id()}")
+        assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# 18+ verification
+# ---------------------------------------------------------------------------
+class TestAgeVerification:
+    @staticmethod
+    def _account_created(days_ago: int) -> str:
+        return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+
+    async def test_old_account_is_approved_automatically(self, client, mock_redis):
+        discord_id = make_discord_id()
+
+        response = await client.post(
+            "/users/verify-18/submit",
+            json={
+                "discord_user_id": discord_id,
+                "discord_account_created_at": self._account_created(400),
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "approved"
+        user = (await client.get(f"/users/{discord_id}")).json()
+        assert user["is_18_verified"] is True
+        assert user["is_18_verified_at"] is not None
+
+    async def test_new_account_is_queued_for_a_moderator(self, client, mock_redis):
+        discord_id = make_discord_id()
+
+        response = await client.post(
+            "/users/verify-18/submit",
+            json={
+                "discord_user_id": discord_id,
+                "discord_account_created_at": self._account_created(10),
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "pending_mod"
+        assert "moderator" in response.json()["detail"]
+        mock_redis.setex.assert_called_once()
+        assert (await client.get(f"/users/{discord_id}")).json()["is_18_verified"] is False
+
+    async def test_moderator_approval(self, client, mock_redis):
+        discord_id = make_discord_id()
+        await client.post("/users", json={"discord_user_id": discord_id})
+
+        response = await client.post(
+            "/users/verify-18/approve", json={"discord_user_id": discord_id}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["is_18_verified"] is True
+
+        again = await client.post(
+            "/users/verify-18/submit", json={"discord_user_id": discord_id}
+        )
+        assert again.json()["status"] == "already_verified"
+
+    async def test_approving_an_unknown_user_returns_404(self, client):
+        response = await client.post(
+            "/users/verify-18/approve", json={"discord_user_id": make_discord_id()}
+        )
         assert response.status_code == 404
