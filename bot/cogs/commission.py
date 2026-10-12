@@ -7,11 +7,11 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-import aiohttp
 import discord
 from discord import Interaction, app_commands
 from discord.ext import commands
 
+from bot.utils.api_client import APIError
 from bot.utils.embeds import (
     base_embed,
     completed_work_embed,
@@ -112,24 +112,19 @@ async def _tos_accept_core(
         user: discord.abc.User
 ) -> tuple[bool, str]:
     try:
-        comm = await bot.api.get(
-            f"/commissions/by-discord-channel/{channel.id}"
-        )
-        client = await bot.api.get(f"/users/{user.id}")
+        comm = await bot.api.get_commission_for_channel(channel.id)
+        client = await bot.api.get_user(user.id)
         if client["id"] != comm["client_id"]:
             return False, "Only the client can confirm TOS"
-        artist = await bot.api.get(f"/artists/{comm['artist_id']}")
+        artist = await bot.api.get_artist(comm['artist_id'])
         if not artist.get("tos_text"):
             return False, "Artist has not set TOS text yet"
         h = _tos_hash(artist["tos_text"])
-        comm = await bot.api.post(
-            f"/commissions/{comm['id']}/tos-accept",
-            json={"tos_version_hash": h}
-        )
+        comm = await bot.api.accept_tos(comm['id'], h)
         await _post_payment_instructions_embed(bot, channel, comm, artist)
         return True, ""
-    except aiohttp.ClientResponseError as exc:
-        return False, str(exc.message)
+    except APIError as exc:
+        return False, exc.detail
     except Exception as exc:
         logger.exception(f"TOS accept failed, Reason: {exc}")
         return False, str(exc)
@@ -159,10 +154,7 @@ class IntakeModal(discord.ui.Modal, title="Commission intake"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         notes = f"{self.brief.value}\n\nReferences:\n{self.refs.value or '—'}"
         try:
-            await self.bot.api.post(
-                f"/commissions/{self.commission_id}/intake",
-                json={"notes": notes}
-            )
+            await self.bot.api.submit_intake(self.commission_id, notes)
             await interaction.response.send_message(
                 embed=success_embed("Intake saved", "The artist can review your brief"),
                 ephemeral=True
@@ -174,9 +166,9 @@ class IntakeModal(discord.ui.Modal, title="Commission intake"):
                         description=notes[:4000],
                     )
                 )
-        except aiohttp.ClientResponseError as exc:
+        except APIError as exc:
             await interaction.response.send_message(
-                embed=error_embed(f"Intake failed {str(exc.message)}"),
+                embed=error_embed(f"Intake failed {exc.detail}"),
                 ephemeral=True
             )
         except Exception as exc:
@@ -223,13 +215,8 @@ class CounterOfferModal(discord.ui.Modal, title="Counter offer"):
 
     async def on_submit(self, interaction: Interaction, /) -> None:
         try:
-            comm = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{self.channel_id}"
-            )
-            await self.bot.api.post(
-                f"/commissions/{comm['id']}/counter-offer",
-                json={"notes": self.notes.value}
-            )
+            comm = await self.bot.api.get_commission_for_channel(self.channel_id)
+            await self.bot.api.counter_offer(comm['id'], self.notes.value)
             await interaction.response.send_message(
                 embed=success_embed(
                     "Counter sent",
@@ -244,9 +231,9 @@ class CounterOfferModal(discord.ui.Modal, title="Counter offer"):
                         description=self.notes.value
                     )
                 )
-        except aiohttp.ClientResponseError as exc:
+        except APIError as exc:
             await interaction.response.send_message(
-                embed=error_embed("Counter failed", str(exc.message)),
+                embed=error_embed("Counter failed", exc.detail),
                 ephemeral=True
             )
 
@@ -294,14 +281,11 @@ class ReviewModal(discord.ui.Modal, title="Leave a review"):
             return
         rating = int(raw)
         try:
-            await self.bot.api.post(
-                f"/commissions/{self.commission_id}/review",
-                json={
-                    "reviewer_id": self.reviewer_uuid,
-                    "rating": rating,
-                    "body": self.comment.value or None,
-                    "is_public": True
-                }
+            await self.bot.api.review(
+                self.commission_id,
+                reviewer_id=self.reviewer_uuid,
+                rating=rating,
+                body=self.comment.value or None
             )
             await interaction.response.send_message(
                 embed=success_embed("Thank you for your review!"),
@@ -315,9 +299,9 @@ class ReviewModal(discord.ui.Modal, title="Leave a review"):
                     rating,
                     self.comment.value or None
                 )
-        except aiohttp.ClientResponseError as exc:
+        except APIError as exc:
             await interaction.response.send_message(
-                embed=error_embed(f"Review failed: {str(exc.message)}"),
+                embed=error_embed(f"Review failed: {exc.detail}"),
                 ephemeral=True
             )
 
@@ -386,18 +370,16 @@ class QuoteActionsView(discord.ui.View):
             await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
             return
         try:
-            comm = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{interaction.channel_id}"
-            )
-            client = await self.bot.api.get(f"/users/{interaction.user.id}")
+            comm = await self.bot.api.get_commission_for_channel(interaction.channel_id)
+            client = await self.bot.api.get_user(interaction.user.id)
             if client["id"] != comm["client_id"]:
                 await interaction.followup.send(
                     embed=error_embed("Only the client can accept the quote"),
                     ephemeral=True
                 )
                 return
-            await self.bot.api.post(f"/commissions/{comm['id']}/accept-quote")
-            artist = await self.bot.api.get(f"/artists/{comm['artist_id']}")
+            await self.bot.api.accept_quote(comm['id'])
+            artist = await self.bot.api.get_artist(comm['artist_id'])
             tos = artist.get("tos_text") or ""
             if not tos:
                 await interaction.followup.send(
@@ -421,8 +403,8 @@ class QuoteActionsView(discord.ui.View):
                 embed=success_embed("Moved to TOS step. Read and accept when ready"),
                 ephemeral=True
             )
-        except aiohttp.ClientResponseError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {str(exc.message)}"))
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
 
     @discord.ui.button(label="Counter offer", style=discord.ButtonStyle.secondary)
     async def counter_btn(
@@ -431,10 +413,8 @@ class QuoteActionsView(discord.ui.View):
             button: discord.ui.Button
     ) -> None:
         try:
-            comm = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{self.channel_id}"
-            )
-            client = await self.bot.api.get(f"/users/{interaction.user.id}")
+            comm = await self.bot.api.get_commission_for_channel(self.channel_id)
+            client = await self.bot.api.get_user(interaction.user.id)
             if client["id"] != comm["client_id"]:
                 await interaction.response.send_message(
                     "Only the client can counter",
@@ -444,7 +424,7 @@ class QuoteActionsView(discord.ui.View):
             await interaction.response.send_modal(
                 CounterOfferModal(self.bot, self.channel_id)
             )
-        except aiohttp.ClientResponseError:
+        except APIError:
             await interaction.response.send_message(
                 "Could not load commission",
                 ephemeral=True
@@ -576,9 +556,7 @@ class ArtistPickView(discord.ui.View):
         artist = self.artists[artist_id]
 
         try:
-            cap = await self.bot.api.get(
-                f"/artists/{artist_id}/active-commission-count"
-            )
+            cap = await self.bot.api.get_artist_capacity(artist_id)
             if cap["count"] >= cap["max"]:
                 await interaction.followup.send(
                     embed=error_embed(
@@ -601,7 +579,7 @@ class ArtistPickView(discord.ui.View):
                 )
                 return
 
-            client_row = await self.bot.api.get(f"/users/{interaction.user.id}")
+            client_row = await self.bot.api.get_user(interaction.user.id)
             channel = await create_commission_ticket(
                 guild,
                 artist_member=artist_member,
@@ -610,20 +588,14 @@ class ArtistPickView(discord.ui.View):
                 nsfw=self._is_nsfw_request
             )
 
-            comm = await self.bot.api.post(
-                "/commissions",
-                json={
-                    "server_id": self.server_uuid,
-                    "artist_id": artist_id,
-                    "client_id": client_row["id"],
-                    "is_nsfw": self._is_nsfw_request
-                },
+            comm = await self.bot.api.create_commission(
+                server_id=self.server_uuid,
+                artist_id=artist_id,
+                client_id=client_row["id"],
+                is_nsfw=self._is_nsfw_request
             )
             comm_id = comm["id"]
-            await self.bot.api.post(
-                f"/commissions/{comm_id}/ticket",
-                json={"discord_ticket_channel_id": str(channel.id)}
-            )
+            await self.bot.api.open_ticket(comm_id, channel.id)
 
             await channel.send(
                 embed=base_embed(
@@ -647,10 +619,10 @@ class ArtistPickView(discord.ui.View):
                 ephemeral=True
             )
 
-        except aiohttp.ClientResponseError as exc:
+        except APIError as exc:
             logger.exception("API error creating commission")
             await interaction.followup.send(
-                embed=error_embed(f"API error: {str(exc.message)}"),
+                embed=error_embed(f"API error: {exc.detail}"),
                 ephemeral=True
             )
 
@@ -695,19 +667,14 @@ class CommissionCog(commands.Cog, name="Commissions"):
             return
 
         try:
-            server = await self.bot.api.get(f"/servers/{guild.id}")
+            server = await self.bot.api.get_server(guild.id)
             server_uuid = server["id"]
-            params: list[tuple[str, str]] = [("server_id", str(server_uuid))]
-            if nsfw_only:
-                params.append(("nsfw_only", "true"))
-            if style and style.strip():
-                params.append(("styles", style.strip()))
-
-            artists_raw = await self.bot.api.get_any(
-                "/artists",
-                params=params
+            artists_raw = await self.bot.api.list_artists(
+                server_uuid,
+                style=style.strip().lower() if style and style.strip() else None,
+                nsfw_only=nsfw_only
             )
-            if not isinstance(artists_raw, list) or not artists_raw:
+            if not artists_raw:
                 await interaction.followup.send(
                     embed=error_embed("No artists, No active artists match these filters"),
                     ephemeral=True
@@ -735,9 +702,9 @@ class CommissionCog(commands.Cog, name="Commissions"):
                 ephemeral=True
             )
 
-        except aiohttp.ClientResponseError as exc:
+        except APIError as exc:
             await interaction.followup.send(
-                embed=error_embed(f"API error: {str(exc.message)}")
+                embed=error_embed(f"API error: {exc.detail}")
             )
 
     @app_commands.command(
@@ -757,11 +724,9 @@ class CommissionCog(commands.Cog, name="Commissions"):
             return
 
         try:
-            comm = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{interaction.channel.id}"
-            )
-            artist_full = await self.bot.api.get(f"/artists/{comm['artist_id']}")
-        except aiohttp.ClientResponseError:
+            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
+            artist_full = await self.bot.api.get_artist(comm['artist_id'])
+        except APIError:
             await interaction.followup.send(embed=error_embed("No commission for this channel"))
             return
 
@@ -773,16 +738,14 @@ class CommissionCog(commands.Cog, name="Commissions"):
             return
 
         usd = await php_to_usd(Decimal(str(amount)))
-        body = {
-            "quoted_price_php": str(amount),
-            "quoted_price_usd": str(usd) if usd is not None else None,
-            "currency_used": "PHP",
-            "revisions_allowed": 2
-        }
         try:
-            await self.bot.api.post(f"/commissions/{comm['id']}/quote", json=body)
-        except aiohttp.ClientResponseError as exc:
-            await interaction.followup.send(embed=error_embed(f"Quote failed: {str(exc.message)}"))
+            await self.bot.api.quote(
+                comm["id"],
+                price_php=str(amount),
+                price_usd=str(usd) if usd is not None else None
+            )
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(f"Quote failed: {exc.detail}"))
             return
 
         desc = f"**₱{amount:,.2f} PHP**"
@@ -809,18 +772,16 @@ class CommissionCog(commands.Cog, name="Commissions"):
             await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
             return
         try:
-            comm = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{interaction.channel.id}"
-            )
-            client = await self.bot.api.get(f"/users/{interaction.user.id}")
+            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
+            client = await self.bot.api.get_user(interaction.user.id)
             if client["id"] != comm["client_id"]:
                 await interaction.followup.send(
                     embed=error_embed("Only the client can accept the quote"),
                     ephemeral=True
                 )
                 return
-            await self.bot.api.post(f"/commissions/{comm['id']}/accept-quote")
-            artist = await self.bot.api.get(f"/artists/{comm['artist_id']}")
+            await self.bot.api.accept_quote(comm['id'])
+            artist = await self.bot.api.get_artist(comm['artist_id'])
             tos = artist.get("tos_text") or ""
             if not tos:
                 await interaction.followup.send(
@@ -843,8 +804,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
                 embed=success_embed("Moved to TOS step"),
                 ephemeral=True
             )
-        except aiohttp.ClientResponseError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {str(exc.message)}"))
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
 
     @app_commands.command(
         name="confirm-tos",
@@ -881,19 +842,14 @@ class CommissionCog(commands.Cog, name="Commissions"):
             await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
             return
         try:
-            comm = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{interaction.channel.id}"
-            )
-            client = await self.bot.api.get(f"/users/{interaction.user.id}")
+            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
+            client = await self.bot.api.get_user(interaction.user.id)
             if client["id"] != comm["client_id"]:
                 await interaction.followup.send(embed=error_embed("Only the client can pay"))
                 return
             data = await receipt.read()
             url = await upload_receipt(data, receipt.filename, str(comm["id"]))
-            await self.bot.api.post(
-                f"/commissions/{comm['id']}/receipt",
-                json={"payment_receipt_url": url}
-            )
+            await self.bot.api.upload_receipt(comm['id'], url)
             await interaction.channel.send(
                 embed=success_embed(
                     "Receipt uploaded",
@@ -904,8 +860,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
                 embed=success_embed("Receipt submitted"),
                 ephemeral=True
             )
-        except aiohttp.ClientResponseError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {str(exc.message)}"))
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
 
     @app_commands.command(
         name="confirm-payment",
@@ -917,17 +873,15 @@ class CommissionCog(commands.Cog, name="Commissions"):
             await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
             return
         try:
-            comm = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{interaction.channel.id}"
-            )
-            artist = await self.bot.api.get(f"/artists/{comm['artist_id']}")
+            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
+            artist = await self.bot.api.get_artist(comm['artist_id'])
             if str(interaction.user.id) != artist["discord_user_id"]:
                 await interaction.followup.send(
                     embed=error_embed("Only the artist can confirm payment"),
                     ephemeral=True
                 )
                 return
-            await self.bot.api.post(f"/commissions/{comm['id']}/confirm-payment")
+            await self.bot.api.confirm_payment(comm['id'])
             await interaction.channel.send(
                 embed=success_embed("Payment confirmed — work may begin")
             )
@@ -935,8 +889,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
                 embed=success_embed("Confirmed"),
                 ephemeral=True
             )
-        except aiohttp.ClientResponseError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {str(exc.message)}"))
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
 
     @app_commands.command(
         name="wip",
@@ -954,19 +908,14 @@ class CommissionCog(commands.Cog, name="Commissions"):
             await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
             return
         try:
-            comm = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{interaction.channel.id}"
-            )
-            artist = await self.bot.api.get(f"/artists/{comm['artist_id']}")
+            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
+            artist = await self.bot.api.get_artist(comm['artist_id'])
             if str(interaction.user.id) != artist["discord_user_id"]:
                 await interaction.followup.send(embed=error_embed("Only the artist can post WIP"))
                 return
             raw = await image.read()
             url = await upload_wip_image(raw, image.filename, str(comm["id"]), watermarked=False)
-            await self.bot.api.post(
-                f"/commissions/{comm['id']}/wip-updates",
-                json={"image_url": url, "artist_note": note or None}
-            )
+            await self.bot.api.post_wip(comm['id'], url, note or None)
             try:
                 from workers.celery_app import celery_app
 
@@ -981,8 +930,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
                 embed=base_embed(title="Work in progress", description=note or "")
             )
             await interaction.followup.send(embed=success_embed("WIP recorded"), ephemeral=True)
-        except aiohttp.ClientResponseError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {str(exc.message)}"))
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
 
     @app_commands.command(
         name="deliver",
@@ -999,19 +948,14 @@ class CommissionCog(commands.Cog, name="Commissions"):
             await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
             return
         try:
-            comm = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{interaction.channel.id}"
-            )
-            artist = await self.bot.api.get(f"/artists/{comm['artist_id']}")
+            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
+            artist = await self.bot.api.get_artist(comm['artist_id'])
             if str(interaction.user.id) != artist["discord_user_id"]:
                 await interaction.followup.send(embed=error_embed("Only the artist can deliver"))
                 return
             raw = await file.read()
             url = await upload_delivery_file(raw, file.filename, str(comm["id"]))
-            await self.bot.api.post(
-                f"/commissions/{comm['id']}/deliver",
-                json={"final_file_url": url}
-            )
+            await self.bot.api.deliver(comm['id'], url)
             await interaction.channel.send(
                 embed=success_embed(
                     "Delivery posted",
@@ -1019,8 +963,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
                 )
             )
             await interaction.followup.send(embed=success_embed("Delivered"), ephemeral=True)
-        except aiohttp.ClientResponseError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {str(exc.message)}"))
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
 
     @app_commands.command(
         name="complete",
@@ -1032,17 +976,15 @@ class CommissionCog(commands.Cog, name="Commissions"):
             await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
             return
         try:
-            comm = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{interaction.channel.id}"
-            )
-            client = await self.bot.api.get(f"/users/{interaction.user.id}")
+            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
+            client = await self.bot.api.get_user(interaction.user.id)
             if client["id"] != comm["client_id"]:
                 await interaction.followup.send(embed=error_embed("Only the client can complete"))
                 return
-            await self.bot.api.post(f"/commissions/{comm['id']}/complete")
-            comm_done = await self.bot.api.get(f"/commissions/{comm['id']}")
-            artist = await self.bot.api.get(f"/artists/{comm['artist_id']}")
-            server = await self.bot.api.get(f"/servers/{interaction.guild.id}")
+            await self.bot.api.complete(comm['id'])
+            comm_done = await self.bot.api.get_commission(comm['id'])
+            artist = await self.bot.api.get_artist(comm['artist_id'])
+            server = await self.bot.api.get_server(interaction.guild.id)
             settings = server.get("settings") or {}
             if isinstance(settings, dict):
                 await _maybe_post_completed_works(
@@ -1071,8 +1013,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
                 )
             )
             await interaction.followup.send(embed=success_embed("Marked complete"), ephemeral=True)
-        except aiohttp.ClientResponseError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {str(exc.message)}"))
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
 
     @app_commands.command(
         name="review",
@@ -1090,24 +1032,19 @@ class CommissionCog(commands.Cog, name="Commissions"):
             await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
             return
         try:
-            comm = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{interaction.channel.id}"
-            )
-            client = await self.bot.api.get(f"/users/{interaction.user.id}")
+            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
+            client = await self.bot.api.get_user(interaction.user.id)
             if client["id"] != comm["client_id"]:
                 await interaction.followup.send(embed=error_embed("Only the client can review"))
                 return
-            await self.bot.api.post(
-                f"/commissions/{comm['id']}/review",
-                json={
-                    "reviewer_id": client["id"],
-                    "rating": rating,
-                    "body": comment or None,
-                    "is_public": True
-                }
+            await self.bot.api.review(
+                comm["id"],
+                reviewer_id=client["id"],
+                rating=rating,
+                body=comment or None
             )
-            artist = await self.bot.api.get(f"/artists/{comm['artist_id']}")
-            server = await self.bot.api.get(f"/servers/{interaction.guild.id}")
+            artist = await self.bot.api.get_artist(comm['artist_id'])
+            server = await self.bot.api.get_server(interaction.guild.id)
             settings = server.get("settings") or {}
             if isinstance(settings, dict) and not comm.get("is_nsfw"):
                 await _maybe_post_completed_works(
@@ -1121,8 +1058,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
                 embed=success_embed("Thank you for your review!"),
                 ephemeral=True
             )
-        except aiohttp.ClientResponseError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {str(exc.message)}"))
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
 
     @app_commands.command(
         name="revision",

@@ -15,26 +15,16 @@ class GuildJoinEvents(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
         try:
-            existing = await self.bot.api.get_or_none(f"/servers/{guild.id}")
+            existing = await self.bot.api.find_server(guild.id)
             if existing is not None:
-                await self.bot.api.patch(
-                    f"/servers/{guild.id}",
-                    json={"name": guild.name}
-                )
+                await self.bot.api.rename_server(guild.id, guild.name)
                 return
 
             provisioned = await provision_artflow_guild(guild)
             merged = ServerSettings().model_dump()
             merged.update(provisioned)
             settings = ServerSettings.model_validate(merged)
-            await self.bot.api.post(
-                "/servers",
-                json={
-                    "discord_guild_id": str(guild.id),
-                    "name": guild.name,
-                    "settings": settings.model_dump()
-                },
-            )
+            await self.bot.api.register_server(guild.id, guild.name, settings.model_dump())
             logger.info("Provisioned ArtFlow structure for guild %s (%s)", guild.name, guild.id)
         except Exception as exc:
             logger.error(

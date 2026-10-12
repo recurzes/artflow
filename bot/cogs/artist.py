@@ -1,11 +1,10 @@
 import logging
-import uuid
 
-import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.utils.api_client import APIError
 from bot.utils.embeds import (
     artist_profile_embed,
     base_embed,
@@ -236,7 +235,7 @@ class ApproveRejectView(discord.ui.View):
 
         try:
             bot = interaction.client
-            server_row = await bot.api.get_or_none(f"/servers/{guild.id}")
+            server_row = await bot.api.find_server(guild.id)
             if server_row is None:
                 await interaction.followup.send(
                     embed=error_embed(
@@ -254,23 +253,19 @@ class ApproveRejectView(discord.ui.View):
                     ephemeral=True
                 )
                 return
-            await bot.api.post(
-                "/artists",
-                json={
-                    "id": str(uuid.uuid4()),
-                    "user_id": str(uuid.uuid4()),
-                    "server_id": str(uuid.uuid4()),
-                    "display_name": self.application["display_name"],
-                    "styles": self.application["styles"],
-                    "social_links": {},
-                    "portfolio_images": [],
-                    "price_min_php": self.application.get("price_min_php"),
-                    "price_max_php": self.application.get("price_max_php"),
-                    "gcash_number": self.application.get("gcash_number"),
-                    "paypal_email": self.application.get("paypal_email"),
-                    "created_at": discord.utils.utcnow().isoformat(),
-                    "updated_at": discord.utils.utcnow().isoformat(),
-                }
+            user_row = await bot.api.upsert_user(
+                member.id,
+                account_created_at=member.created_at.isoformat()
+            )
+            await bot.api.create_artist(
+                user_id=user_row["id"],
+                server_id=server_uuid,
+                display_name=self.application["display_name"],
+                styles=self.application["styles"],
+                price_min_php=self.application.get("price_min_php"),
+                price_max_php=self.application.get("price_max_php"),
+                gcash_number=self.application.get("gcash_number"),
+                paypal_email=self.application.get("paypal_email"),
             )
         except Exception as exc:
             logger.error("Failed to create artist via API: %s", exc)
@@ -485,41 +480,15 @@ class ArtistCog(commands.Cog, name="Artists"):
             )
             return
         try:
-            server = await self.bot.api.get(f"/servers/{guild.id}")
-            artists_raw = await self.bot.api.get_any(
-                "/artists",
-                params={"server_id": server["id"]}
+            server = await self.bot.api.get_server(guild.id)
+            artist_row = await self.bot.api.get_artist_for_member(
+                server["id"],
+                interaction.user.id
             )
-        except aiohttp.ClientResponseError as exc:
-            await interaction.followup.send(
-                embed=error_embed(f"API error: {str(exc.message)}"),
-                ephemeral=True
-            )
+            await self.bot.api.update_artist(artist_row["id"], tos_text=text)
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(exc.detail), ephemeral=True)
             return
-
-        if not isinstance(artists_raw, list):
-            await interaction.followup.send(
-                embed=error_embed("Invalid response from API"),
-                ephemeral=True
-            )
-            return
-        me = str(interaction.user.id)
-        artist_row = next(
-            (a for a in artists_raw if a.get("discord_user_id") == me),
-            None
-        )
-        if artist_row is None:
-            await interaction.followup.send(
-                embed=error_embed(
-                    "Not an artist, You are not registered artist on this server",
-                ),
-                ephemeral=True
-            )
-            return
-        await self.bot.api.patch(
-            f"/artists/{artist_row['id']}",
-            json={"tos_text": text}
-        )
         await interaction.followup.send(
             embed=success_embed(
                 "TOS saved",
@@ -547,38 +516,15 @@ class ArtistCog(commands.Cog, name="Artists"):
             )
             return
         try:
-            server = await self.bot.api.get(f"/servers/{guild.id}")
-            artists_raw = await self.bot.api.get_any(
-                "/artists",
-                params={"server_id": server["id"]}
+            server = await self.bot.api.get_server(guild.id)
+            artist_row = await self.bot.api.get_artist_for_member(
+                server["id"],
+                interaction.user.id
             )
-        except aiohttp.ClientResponseError as exc:
-            await interaction.followup.send(
-                embed=error_embed(f"API error: {str(exc.message)}"),
-                ephemeral=True
-            )
+            await self.bot.api.update_artist(artist_row["id"], nsfw_enabled=enabled)
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(exc.detail), ephemeral=True)
             return
-        if not isinstance(artists_raw, list):
-            await interaction.followup.send(
-                embed=error_embed("Invalid response from API"),
-                ephemeral=True,
-            )
-            return
-        me = str(interaction.user.id)
-        artist_row = next(
-            (a for a in artists_raw if a.get("discord_user_id") == me),
-            None
-        )
-        if artist_row is None:
-            await interaction.followup.send(
-                embed=error_embed("Not an artist: You are not registered on this server"),
-                ephemeral=True
-            )
-            return
-        await self.bot.api.patch(
-            f"/artists/{artist_row['id']}",
-            json={"nsfw_enabled": enabled}
-        )
         await interaction.followup.send(
             embed=success_embed(
                 "NSFW setting updated",

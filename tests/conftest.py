@@ -42,6 +42,7 @@ from sqlalchemy.pool import NullPool  # noqa: E402
 
 from api.dependencies import get_db, get_redis_client  # noqa: E402
 from api.main import app  # noqa: E402
+from bot.utils.api_client import APIClient  # noqa: E402
 from shared.config import settings  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -146,6 +147,12 @@ async def anon_client(session_factory, mock_redis) -> AsyncGenerator[AsyncClient
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def bot_api(client) -> APIClient:
+    """The bot's own API client, wired straight into the app (no network)."""
+    return APIClient(client)
 
 
 @pytest.fixture
