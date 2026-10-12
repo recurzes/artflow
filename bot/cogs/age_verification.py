@@ -113,10 +113,6 @@ class AgeVerificationCog(commands.Cog, name="Age verification"):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    @commands.Cog.listener()
-    async def on_ready(self) -> None:
-        self.bot.add_view(AgeRequestView())
-
     @app_commands.command(
         name="age-gate-post",
         description="[Mod] Post the 18+ request button in this channel (e.g., #age-check)"
@@ -184,3 +180,4 @@ class AgeVerificationCog(commands.Cog, name="Age verification"):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(AgeVerificationCog(bot))
+    bot.add_view(AgeRequestView())

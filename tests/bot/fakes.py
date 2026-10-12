@@ -50,6 +50,7 @@ def make_guild(*members: MagicMock, guild_id: int = 9001) -> MagicMock:
     guild.get_member = lambda member_id: by_id.get(member_id)
     guild.get_channel = MagicMock(return_value=None)
     guild.roles = []
+    guild.channels = []
     guild.text_channels = []
     guild.categories = []
     return guild

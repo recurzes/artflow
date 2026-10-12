@@ -151,6 +151,7 @@ async def test_commission_lifecycle_disputes_and_admin(bot_api):
     dispute = await bot_api.open_dispute(
         sid, raised_by=artist_user["discord_user_id"], reason="Client stopped replying"
     )
+    assert (await bot_api.get_dispute_for_commission(sid))["id"] == dispute["id"]
     resolved = await bot_api.resolve_dispute(
         dispute["id"],
         resolved_by=make_discord_id(),

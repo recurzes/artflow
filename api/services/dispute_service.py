@@ -34,6 +34,16 @@ async def get_dispute_by_commission_id(
     return await db.scalar(select(Dispute).where(Dispute.commission_id == commission_id))
 
 
+async def require_dispute_for_commission(
+        db: AsyncSession,
+        commission_id: uuid.UUID
+) -> Dispute:
+    dispute = await get_dispute_by_commission_id(db, commission_id)
+    if dispute is None:
+        raise NotFound("There is no dispute on this commission")
+    return dispute
+
+
 async def open_dispute(
         db: AsyncSession,
         body: DisputeCreate
