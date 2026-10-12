@@ -3,13 +3,13 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.artists import service as artist_service
 from api.commissions import service as commission_service
+from api.reviews import repository
 from api.reviews.schemas import ReviewCreate
 from shared.errors import Conflict, Forbidden, InvalidState
-from shared.models.artist import Artist
 from shared.models.commission import CommissionStatus
 from shared.models.review import Review
 
@@ -27,34 +27,27 @@ async def create_review(
     if data.reviewer_id != comm.client_id:
         raise Forbidden("Only the commissioning client can review this commission")
 
-    existing = await db.scalar(select(Review).where(Review.commission_id == commission_id))
-    if existing is not None:
+    if await repository.get_by_commission_id(db, commission_id) is not None:
         raise Conflict("This commission has already been reviewed")
 
-    review = Review(
-        commission_id=commission_id,
-        reviewer_id=data.reviewer_id,
-        artist_id=comm.artist_id,
-        rating=data.rating,
-        body=data.body,
-        is_public=data.is_public
+    review = await repository.add(
+        db,
+        Review(
+            commission_id=commission_id,
+            reviewer_id=data.reviewer_id,
+            artist_id=comm.artist_id,
+            rating=data.rating,
+            body=data.body,
+            is_public=data.is_public
+        )
     )
-    db.add(review)
-    await db.flush()
 
     # Recompute from the reviews themselves instead of adjusting a running
     # average, so concurrent reviews cannot make the stored figure drift.
-    artist = await db.scalar(
-        select(Artist).where(Artist.id == comm.artist_id).with_for_update()
-    )
-    average, count = (
-        await db.execute(
-            select(func.avg(Review.rating), func.count(Review.id))
-            .where(Review.artist_id == comm.artist_id)
-        )
-    ).one()
-    artist.rating_avg = float(Decimal(str(average)).quantize(Decimal("0.01")))
-    artist.rating_count = int(count)
+    artist = await artist_service.get_artist_for_update(db, comm.artist_id)
+    average, count = await repository.rating_summary_for_artist(db, comm.artist_id)
+    artist.rating_avg = float((average or Decimal(0)).quantize(Decimal("0.01")))
+    artist.rating_count = count
 
     await db.flush()
     return review

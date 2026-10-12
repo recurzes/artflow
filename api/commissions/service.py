@@ -4,22 +4,21 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
 
 from api.artists import service as artist_service
+from api.commissions import repository
 from api.commissions.schemas import (
     CommissionCreate,
     QuoteCreate,
     WipCreateBody,
 )
+from api.servers import service as server_service
+from api.users import service as user_service
 from shared import storage
 from shared.errors import Conflict, Forbidden, InvalidState, NotFound
-from shared.models.artist import Artist, ArtistStatus
+from shared.models.artist import ArtistStatus
 from shared.models.commission import Commission, CommissionStatus, PaymentMethod
-from shared.models.server import Server
-from shared.models.user import User
 from shared.models.wip_update import WipUpdate
 
 PAYMENT_WINDOW_HOURS = 24
@@ -49,8 +48,6 @@ VALID_TRANSITIONS: dict[CommissionStatus, set[CommissionStatus]] = {
     CommissionStatus.DISPUTED: {CommissionStatus.COMPLETED, CommissionStatus.CANCELLED},
     CommissionStatus.CANCELLED: set(),
 }
-
-TERMINAL_STATUSES = (CommissionStatus.COMPLETED, CommissionStatus.CANCELLED)
 
 
 def _utcnow() -> datetime:
@@ -109,19 +106,8 @@ def mark_cancelled(comm: Commission) -> None:
 
 # Reads
 
-# Every commission handed to a caller carries its client and its artist's user,
-# so the Discord IDs of both parties are always available.
-_WITH_PARTIES = (
-    joinedload(Commission.client, innerjoin=True),
-    joinedload(Commission.artist, innerjoin=True).joinedload(Artist.user, innerjoin=True),
-)
-
-
 async def get_commission(db: AsyncSession, commission_id: uuid.UUID) -> Commission:
-    result = await db.execute(
-        select(Commission).options(*_WITH_PARTIES).where(Commission.id == commission_id)
-    )
-    comm = result.scalar_one_or_none()
+    comm = await repository.get_by_id(db, commission_id)
     if comm is None:
         raise NotFound("Commission not found")
     return comm
@@ -130,13 +116,7 @@ async def get_commission(db: AsyncSession, commission_id: uuid.UUID) -> Commissi
 async def get_commission_for_update(db: AsyncSession, commission_id: uuid.UUID) -> Commission:
     """Load and row-lock a commission so concurrent actions (a double-clicked
     button, a sweep racing a user) are applied one after the other."""
-    result = await db.execute(
-        select(Commission)
-        .options(*_WITH_PARTIES)
-        .where(Commission.id == commission_id)
-        .with_for_update(of=Commission)
-    )
-    comm = result.scalar_one_or_none()
+    comm = await repository.get_by_id(db, commission_id, for_update=True)
     if comm is None:
         raise NotFound("Commission not found")
     return comm
@@ -146,15 +126,17 @@ async def get_commission_by_discord_channel_id(
         db: AsyncSession,
         discord_channel_id: str,
 ) -> Commission:
-    result = await db.execute(
-        select(Commission)
-        .options(*_WITH_PARTIES)
-        .where(Commission.discord_ticket_channel_id == discord_channel_id)
-    )
-    comm = result.scalar_one_or_none()
+    comm = await repository.get_by_ticket_channel(db, discord_channel_id)
     if comm is None:
         raise NotFound("No commission for this channel")
     return comm
+
+
+async def get_artist_capacity(db: AsyncSession, artist_id: uuid.UUID) -> tuple[int, int]:
+    """(commissions currently occupying a slot, the artist's limit)."""
+    artist = await artist_service.get_artist(db, artist_id)
+    active = await repository.count_active_for_artist(db, artist_id)
+    return active, artist.max_active_commissions
 
 
 async def get_file_urls(db: AsyncSession, commission_id: uuid.UUID) -> dict[str, str | None]:
@@ -175,20 +157,20 @@ async def get_file_urls(db: AsyncSession, commission_id: uuid.UUID) -> dict[str,
 # Use cases
 
 async def create_commission(db: AsyncSession, data: CommissionCreate) -> Commission:
-    server = await db.scalar(select(Server).where(Server.id == data.server_id))
-    if server is None:
-        raise NotFound("Server not found")
+    await server_service.get_server(db, data.server_id)
 
-    # Lock the artist row: the capacity check below must not race another request.
-    artist = await db.scalar(
-        select(Artist).where(Artist.id == data.artist_id).with_for_update()
-    )
+    # Locked: the capacity check below must not race another request.
+    try:
+        artist = await artist_service.get_artist_for_update(db, data.artist_id)
+    except NotFound:
+        artist = None
     if artist is None or artist.server_id != data.server_id:
         raise NotFound("Artist not found on this server")
 
-    client_user = await db.scalar(select(User).where(User.id == data.client_id))
-    if client_user is None:
-        raise NotFound("Client user not found")
+    try:
+        client_user = await user_service.get_user(db, data.client_id)
+    except NotFound as exc:
+        raise NotFound("Client user not found") from exc
 
     if artist.status != ArtistStatus.ACTIVE:
         raise InvalidState("This artist is not accepting commissions right now")
@@ -201,7 +183,7 @@ async def create_commission(db: AsyncSession, data: CommissionCreate) -> Commiss
         if not artist.nsfw_enabled:
             raise InvalidState("This artist has not enabled NSFW commissions")
 
-    active = await artist_service.count_active_commissions_for_artist(db, artist.id)
+    active = await repository.count_active_for_artist(db, artist.id)
     if active >= artist.max_active_commissions:
         raise Conflict("This artist has reached their maximum number of active commissions")
 
@@ -214,8 +196,7 @@ async def create_commission(db: AsyncSession, data: CommissionCreate) -> Commiss
         deadline_at=data.deadline_at,
         status=CommissionStatus.INQUIRY,
     )
-    db.add(comm)
-    await db.flush()
+    await repository.add(db, comm)
     return await get_commission(db, comm.id)
 
 
@@ -227,12 +208,7 @@ async def open_ticket(
     """Attach the Discord ticket channel; the commission is now waiting for the brief."""
     comm = await get_commission_for_update(db, commission_id)
     _require_status(comm, CommissionStatus.INQUIRY, action="Opening a ticket")
-    taken = await db.scalar(
-        select(Commission.id).where(
-            Commission.discord_ticket_channel_id == discord_ticket_channel_id
-        )
-    )
-    if taken is not None:
+    if await repository.ticket_channel_in_use(db, discord_ticket_channel_id):
         raise Conflict("That channel is already the ticket of another commission")
     comm.discord_ticket_channel_id = discord_ticket_channel_id
     _transition(comm, CommissionStatus.INTAKE)
@@ -310,8 +286,8 @@ async def confirm_tos_acceptance(
     comm = await get_commission_for_update(db, commission_id)
     _require_status(comm, CommissionStatus.TOS_PENDING, action="Accepting the terms")
 
-    artist = await db.scalar(select(Artist).where(Artist.id == comm.artist_id))
-    if artist is None or not artist.tos_text:
+    artist = await artist_service.get_artist(db, comm.artist_id)
+    if not artist.tos_text:
         raise InvalidState("The artist has not set their terms of service yet")
 
     if tos_version_hash != artist_service.tos_hash(artist.tos_text):
@@ -368,7 +344,8 @@ async def create_wip_update(
         CommissionStatus.WIP,
         action="Posting a WIP update"
     )
-    db.add(
+    await repository.add_wip_update(
+        db,
         WipUpdate(
             commission_id=comm.id,
             image_key=body.image_key,
@@ -455,15 +432,8 @@ async def expire_unpaid(db: AsyncSession) -> list[Commission]:
     A commission with a receipt is left alone even when the artist has not
     confirmed it: the client may have paid, and that is a dispute, not a lapse.
     """
-    overdue = await db.scalars(
-        select(Commission.id).where(
-            Commission.status == CommissionStatus.PAYMENT_PENDING,
-            Commission.payment_deadline_at < _utcnow(),
-            Commission.payment_receipt_key.is_(None),
-        )
-    )
     cancelled: list[Commission] = []
-    for commission_id in overdue.all():
+    for commission_id in await repository.list_unpaid_past_deadline(db, _utcnow()):
         comm = await get_commission_for_update(db, commission_id)
         if (
             comm.status != CommissionStatus.PAYMENT_PENDING
@@ -480,14 +450,8 @@ async def expire_unpaid(db: AsyncSession) -> list[Commission]:
 
 async def auto_accept_deliveries(db: AsyncSession) -> list[Commission]:
     """Complete deliveries the client neither accepted nor disputed in time."""
-    due = await db.scalars(
-        select(Commission.id).where(
-            Commission.status == CommissionStatus.DELIVERED,
-            Commission.delivery_auto_accept_at < _utcnow(),
-        )
-    )
     completed: list[Commission] = []
-    for commission_id in due.all():
+    for commission_id in await repository.list_deliveries_past_auto_accept(db, _utcnow()):
         comm = await get_commission_for_update(db, commission_id)
         if (
             comm.status != CommissionStatus.DELIVERED
@@ -505,17 +469,13 @@ async def take_payment_reminders(db: AsyncSession) -> list[Commission]:
     """Commissions whose payment deadline is near and that have not been
     reminded yet. They are marked as reminded here, so each is returned once."""
     now = _utcnow()
-    due = await db.scalars(
-        select(Commission.id).where(
-            Commission.status == CommissionStatus.PAYMENT_PENDING,
-            Commission.payment_reminder_sent.is_(False),
-            Commission.payment_receipt_key.is_(None),
-            Commission.payment_deadline_at > now,
-            Commission.payment_deadline_at <= now + PAYMENT_REMINDER_WINDOW,
-        )
+    due = await repository.list_unreminded_with_deadline_between(
+        db,
+        now,
+        now + PAYMENT_REMINDER_WINDOW
     )
     reminded: list[Commission] = []
-    for commission_id in due.all():
+    for commission_id in due:
         comm = await get_commission_for_update(db, commission_id)
         if comm.status != CommissionStatus.PAYMENT_PENDING or comm.payment_reminder_sent:
             continue

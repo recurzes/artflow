@@ -3,14 +3,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.artists import service as artist_service
 from api.commissions import service as commission_service
+from api.disputes import repository
 from api.disputes.schemas import DisputeCreate, DisputeResolve
 from api.users import service as user_service
 from shared.errors import Conflict, Forbidden, InvalidState, NotFound
-from shared.models.artist import Artist
 from shared.models.commission import CommissionStatus
 from shared.models.dispute import Dispute, DisputeStatus
 
@@ -20,26 +20,17 @@ def _utcnow() -> datetime:
 
 
 async def get_dispute(db: AsyncSession, dispute_id: uuid.UUID) -> Dispute:
-    dispute = await db.scalar(
-        select(Dispute).where(Dispute.id == dispute_id).with_for_update()
-    )
+    dispute = await repository.get_by_id_for_update(db, dispute_id)
     if dispute is None:
         raise NotFound("Dispute not found")
     return dispute
-
-
-async def get_dispute_by_commission_id(
-        db: AsyncSession,
-        commission_id: uuid.UUID
-) -> Dispute | None:
-    return await db.scalar(select(Dispute).where(Dispute.commission_id == commission_id))
 
 
 async def require_dispute_for_commission(
         db: AsyncSession,
         commission_id: uuid.UUID
 ) -> Dispute:
-    dispute = await get_dispute_by_commission_id(db, commission_id)
+    dispute = await repository.get_by_commission_id(db, commission_id)
     if dispute is None:
         raise NotFound("There is no dispute on this commission")
     return dispute
@@ -54,13 +45,11 @@ async def open_dispute(
         raise NotFound("Accept the server terms before raising a dispute")
 
     comm = await commission_service.get_commission_for_update(db, body.commission_id)
-    artist = await db.scalar(select(Artist).where(Artist.id == comm.artist_id))
-    is_client = comm.client_id == raiser.id
-    is_artist = artist is not None and artist.user_id == raiser.id
-    if not is_client and not is_artist:
+    artist = await artist_service.get_artist(db, comm.artist_id)
+    if raiser.id not in (comm.client_id, artist.user_id):
         raise Forbidden("Only the client or the artist can open a dispute")
 
-    existing = await get_dispute_by_commission_id(db, body.commission_id)
+    existing = await repository.get_by_commission_id(db, body.commission_id)
     if existing is not None:
         if existing.status == DisputeStatus.RESOLVED:
             raise Conflict("A dispute for this commission was already resolved")
@@ -73,15 +62,15 @@ async def open_dispute(
         )
     commission_service.mark_disputed(comm)
 
-    dispute = Dispute(
-        commission_id=body.commission_id,
-        raised_by=raiser.id,
-        reason=body.reason,
-        status=DisputeStatus.OPEN
+    return await repository.add(
+        db,
+        Dispute(
+            commission_id=body.commission_id,
+            raised_by=raiser.id,
+            reason=body.reason,
+            status=DisputeStatus.OPEN
+        )
     )
-    db.add(dispute)
-    await db.flush()
-    return dispute
 
 
 async def resolve_dispute(

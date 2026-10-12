@@ -13,6 +13,7 @@ from api.artists.schemas import (
     ArtistRejection,
     ArtistUpdate,
 )
+from api.commissions import service as commission_service
 from api.dependencies import BotAuth, DBSession
 from shared.models.artist import Artist
 
@@ -91,7 +92,7 @@ async def active_commission_count(
         db: DBSession,
         _auth: BotAuth
 ) -> ArtistCommissionCapacity:
-    count, max_commissions = await artist_service.get_artist_commission_capacity(db, artist_id)
+    count, max_commissions = await commission_service.get_artist_capacity(db, artist_id)
     return ArtistCommissionCapacity(count=count, max=max_commissions)
 
 @router.post("/{artist_id}/approve", response_model=ArtistRead)
