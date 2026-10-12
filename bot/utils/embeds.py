@@ -77,10 +77,18 @@ def payment_instructions_embed(
         embed.add_field(name="Amount due", value=f"₱{quoted_price_php:,.2f} PHP", inline=True)
     if payment_deadline_display:
         embed.add_field(name="Pay by", value=payment_deadline_display, inline=True)
-    gcash = gcash_number or ""
-    paypal = paypal_email or ""
-    embed.add_field(name="GCash number", value=gcash, inline=True)
-    embed.add_field(name="PayPal", value=paypal, inline=True)
+    # Discord rejects a field with an empty value, so only add what the artist has set.
+    if gcash_number:
+        embed.add_field(name="GCash number", value=gcash_number, inline=False)
+    if paypal_email:
+        embed.add_field(name="PayPal", value=paypal_email, inline=False)
+    if not gcash_number and not paypal_email:
+        embed.add_field(
+            name="Payment details",
+            value="The artist has not saved any. Ask them in this channel where to pay",
+            inline=False
+        )
+    return embed
 
 def public_review_embed(
         *,
