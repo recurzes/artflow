@@ -17,7 +17,10 @@ class CommissionCreate(BaseModel):
     commission_type: str | None = None
     is_nsfw: bool = False
     deadline_at: datetime | None = None
-    discord_ticket_channel_id: str | None = None
+
+
+class TicketOpenBody(BaseModel):
+    discord_ticket_channel_id: str = Field(min_length=1, max_length=20)
 
 
 class QuoteCreate(BaseModel):
@@ -28,15 +31,6 @@ class QuoteCreate(BaseModel):
     currency_used: CurrencyUsed = CurrencyUsed.PHP
     revisions_allowed: int = 2
     deadline_at: datetime | None = None
-
-
-class CommissionStatusUpdate(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    status: CommissionStatus
-    # Optional fields filled in at specific stage transitions
-    payment_method: PaymentMethod | None = None
-    payment_receipt_url: str | None = None
 
 
 class TosAcceptBody(BaseModel):

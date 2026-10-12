@@ -5,6 +5,7 @@ sessions (which share the test's connection and its outer transaction).
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.models.artist import Artist, ArtistStatus
+from shared.models.commission import Commission, CommissionStatus
 from shared.models.server import Server
 from shared.models.user import User
 from tests.conftest import make_discord_id
@@ -55,3 +56,27 @@ async def make_artist(
     db.add(artist)
     await db.commit()
     return artist
+
+
+async def make_commission(
+        db: AsyncSession,
+        *,
+        artist: Artist | None = None,
+        client: User | None = None,
+        status: CommissionStatus = CommissionStatus.INQUIRY,
+        **overrides
+) -> Commission:
+    """A commission placed directly in `status`, bypassing the lifecycle."""
+    artist = artist or await make_artist(db)
+    client = client or await make_user(db)
+    commission = Commission(
+        server_id=artist.server_id,
+        artist_id=artist.id,
+        client_id=client.id,
+        status=status,
+        discord_ticket_channel_id=overrides.pop("discord_ticket_channel_id", make_discord_id()),
+        **overrides,
+    )
+    db.add(commission)
+    await db.commit()
+    return commission

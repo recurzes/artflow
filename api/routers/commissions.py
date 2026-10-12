@@ -1,7 +1,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 
 from api.dependencies import BotAuth, DBSession
 from api.services import commission_service, review_service
@@ -9,12 +9,12 @@ from shared.models.commission import PaymentMethod
 from shared.schemas.commission import (
     CommissionCreate,
     CommissionRead,
-    CommissionStatusUpdate,
     CounterOfferBody,
     DeliverySubmitBody,
     IntakeSubmitBody,
     QuoteCreate,
     ReceiptUploadBody,
+    TicketOpenBody,
     TosAcceptBody,
     WipCreateBody,
 )
@@ -36,11 +36,6 @@ async def get_commission_by_discord_channel(
         db,
         discord_channel_id
     )
-    if comm is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No commission for this channel"
-        )
     return CommissionRead.model_validate(comm)
 
 @router.post("", response_model=CommissionRead, status_code=status.HTTP_201_CREATED)
@@ -59,18 +54,20 @@ async def get_commission(
         _auth: BotAuth
 ) -> CommissionRead:
     comm = await commission_service.get_commission(db, commission_id)
-    if comm is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     return CommissionRead.model_validate(comm)
 
-@router.patch("/{commission_id}/status", response_model=CommissionRead)
-async def update_commission_status(
+@router.post("/{commission_id}/ticket", response_model=CommissionRead)
+async def open_ticket(
         commission_id: uuid.UUID,
-        body: CommissionStatusUpdate,
+        body: TicketOpenBody,
         db: DBSession,
         _auth: BotAuth
 ) -> CommissionRead:
-    comm = await commission_service.transition_status(db, commission_id, body)
+    comm = await commission_service.open_ticket(
+        db,
+        commission_id,
+        body.discord_ticket_channel_id
+    )
     return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/intake", response_model=CommissionRead)
@@ -81,6 +78,16 @@ async def submit_intake(
         _auth: BotAuth
 ) -> CommissionRead:
     comm = await commission_service.submit_intake(db, commission_id, body.notes)
+    return CommissionRead.model_validate(comm)
+
+@router.post("/{commission_id}/quote", response_model=CommissionRead)
+async def apply_quote(
+        commission_id: uuid.UUID,
+        body: QuoteCreate,
+        db: DBSession,
+        _auth: BotAuth
+) -> CommissionRead:
+    comm = await commission_service.apply_quote(db, commission_id, body)
     return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/counter-offer", response_model=CommissionRead)
@@ -97,14 +104,13 @@ async def counter_offer(
     )
     return CommissionRead.model_validate(comm)
 
-@router.post("/{commission_id}/quote", response_model=CommissionRead)
-async def apply_quote(
+@router.post("/{commission_id}/accept-quote", response_model=CommissionRead)
+async def accept_quote(
         commission_id: uuid.UUID,
-        body: QuoteCreate,
         db: DBSession,
         _auth: BotAuth
 ) -> CommissionRead:
-    comm = await commission_service.apply_quote(db, commission_id, body)
+    comm = await commission_service.accept_quote(db, commission_id)
     return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/tos-accept", response_model=CommissionRead)
