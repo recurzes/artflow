@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from api.services import artist_service
+from api.artists import service as artist_service
 from shared import storage
 from shared.errors import Conflict, Forbidden, InvalidState, NotFound
 from shared.models.artist import Artist, ArtistStatus
