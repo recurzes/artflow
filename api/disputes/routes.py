@@ -3,8 +3,8 @@ import uuid
 from fastapi import APIRouter, status
 
 from api.dependencies import BotAuth, DBSession
-from api.services import dispute_service
-from shared.schemas.dispute import DisputeCreate, DisputeRead, DisputeResolve
+from api.disputes import service as dispute_service
+from api.disputes.schemas import DisputeCreate, DisputeRead, DisputeResolve
 
 router = APIRouter(prefix="/disputes", tags=["disputes"])
 
