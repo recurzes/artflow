@@ -6,10 +6,8 @@ from pydantic import BaseModel, EmailStr, Field
 from shared.schemas.common import TimestampSchema
 
 
-class UserCreate(TimestampSchema):
-    model_config = TimestampSchema.model_config
-
-    discord_user_id: str
+class UserCreate(BaseModel):
+    discord_user_id: str = Field(min_length=1, max_length=20)
     is_phone_verified: bool = False
     discord_account_created_at: datetime | None = None
 

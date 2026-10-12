@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 
 from sqlalchemy import String, cast, func, select
@@ -5,11 +6,18 @@ from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from shared.errors import NotFound
 from shared.models.artist import Artist, ArtistStatus
 from shared.models.commission import Commission, CommissionStatus
+from shared.models.user import User
 from shared.schemas.artist import ArtistCreate, ArtistUpdate
 
-_TERMINAL_COMMISSION_STATUSES = (CommissionStatus. COMPLETED, CommissionStatus.CANCELLED)
+_TERMINAL_COMMISSION_STATUSES = (CommissionStatus.COMPLETED, CommissionStatus.CANCELLED)
+
+
+def tos_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
 
 async def create_artist(db: AsyncSession, data: ArtistCreate) -> Artist:
     artist = Artist(
@@ -20,66 +28,54 @@ async def create_artist(db: AsyncSession, data: ArtistCreate) -> Artist:
         styles=data.styles,
         social_links=data.social_links,
         portfolio_images=data.portfolio_images,
-        price_min_php=float(data.price_min_php) if data.price_min_php else None,
-        price_max_php=float(data.price_max_php) if data.price_max_php else None,
+        price_min_php=float(data.price_min_php) if data.price_min_php is not None else None,
+        price_max_php=float(data.price_max_php) if data.price_max_php is not None else None,
         nsfw_enabled=data.nsfw_enabled,
-        max_active_commission=data.max_active_commissions,
+        max_active_commissions=data.max_active_commissions,
         gcash_number=data.gcash_number,
+        paypal_email=data.paypal_email,
         status=ArtistStatus.ACTIVE
     )
     db.add(artist)
     await db.flush()
-    return artist
+    return await get_artist(db, artist.id)
 
-async def update_artist_status(
-        db:AsyncSession,
-        artist_id: uuid.UUID,
-        status: ArtistStatus
-) -> Artist | None:
-    result = await db.execute(select(Artist).where(Artist.id == artist_id))
-    artist = result.scalar_one_or_none()
-    if artist is None:
-        return None
-    artist.status = status
-    await db.flush()
-    return artist
 
-async def update_artist(
-    db: AsyncSession, artist_id: uuid.UUID, data: ArtistUpdate
-) -> Artist | None:
-    result = await db.execute(select(Artist).where(Artist.id == artist_id))
-    artist = result.scalar_one_or_none()
-    if artist is None:
-        return None
-
+async def update_artist(db: AsyncSession, artist_id: uuid.UUID, data: ArtistUpdate) -> Artist:
+    artist = await get_artist(db, artist_id)
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(artist, field, value)
-
     await db.flush()
     return artist
 
 
-async def get_artist_by_id(db: AsyncSession, artist_id: uuid.UUID) -> Artist | None:
+async def get_artist(db: AsyncSession, artist_id: uuid.UUID) -> Artist:
     result = await db.execute(
         select(Artist).options(joinedload(Artist.user)).where(Artist.id == artist_id)
     )
-    return result.scalar_one_or_none()
+    artist = result.scalar_one_or_none()
+    if artist is None:
+        raise NotFound("Artist not found")
+    return artist
 
 
 async def get_artist_by_discord_id(
         db: AsyncSession,
         discord_user_id: str,
         server_id: uuid.UUID
-) -> Artist | None:
-    from shared.models.user import User
-
+) -> Artist:
     result = await db.execute(
         select(Artist)
+        .options(joinedload(Artist.user))
         .join(User, Artist.user_id == User.id)
         .where(User.discord_user_id == discord_user_id)
         .where(Artist.server_id == server_id)
     )
-    return result.scalar_one_or_none()
+    artist = result.scalar_one_or_none()
+    if artist is None:
+        raise NotFound("This member is not a registered artist on this server")
+    return artist
+
 
 async def get_artists_for_server(
         db: AsyncSession,
@@ -93,6 +89,7 @@ async def get_artists_for_server(
         select(Artist)
         .options(joinedload(Artist.user))
         .where(Artist.server_id == server_id)
+        .order_by(Artist.display_name)
     )
 
     if active_only:
@@ -104,7 +101,8 @@ async def get_artists_for_server(
         query = query.where(styles_col.overlap(cast(styles, PG_ARRAY(String))))
 
     result = await db.execute(query)
-    return list[Artist](result.scalars().all())
+    return list(result.scalars().all())
+
 
 async def count_active_commissions_for_artist(
         db: AsyncSession,
@@ -120,16 +118,11 @@ async def count_active_commissions_for_artist(
     )
     return int(result.scalar_one() or 0)
 
+
 async def get_artist_commission_capacity(
         db: AsyncSession,
         artist_id: uuid.UUID
-) -> tuple[int, int] | None:
-    result = await db.execute(
-        select(Artist)
-        .where(Artist.id == artist_id)
-    )
-    artist = result.scalar_one_or_none()
-    if artist is None:
-        return None
+) -> tuple[int, int]:
+    artist = await get_artist(db, artist_id)
     count = await count_active_commissions_for_artist(db, artist_id)
     return count, artist.max_active_commissions

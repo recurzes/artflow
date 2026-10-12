@@ -1,7 +1,7 @@
 import uuid
 from decimal import Decimal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query, status
 
 from api.dependencies import BotAuth, DBSession
 from api.services import artist_service
@@ -24,7 +24,7 @@ def _dec_price(value: object | None) -> Decimal | None:
 @router.get("", response_model=list[ArtistListItem])
 async def list_artists(
         db: DBSession,
-        _auth: BotAuth = None,
+        _auth: BotAuth,
         server_id: uuid.UUID = Query(...),
         styles: list[str] | None = Query(default=None),
         nsfw_only: bool = Query(default=False),
@@ -41,8 +41,8 @@ async def list_artists(
             display_name=a.display_name,
             discord_user_id=a.user.discord_user_id,
             styles=a.styles,
-            price_min_php=Decimal(str(a.price_min_php)) if a.price_min_php is not None else None,
-            price_max_php=Decimal(str(a.price_max_php)) if a.price_max_php is not None else None,
+            price_min_php=_dec_price(a.price_min_php),
+            price_max_php=_dec_price(a.price_max_php),
             rating_avg=Decimal(str(a.rating_avg)),
             rating_count=a.rating_count,
             nsfw_enabled=a.nsfw_enabled,
@@ -57,11 +57,18 @@ async def create_artist(
         db: DBSession,
         _auth: BotAuth
 ) -> ArtistRead:
-    created = await artist_service.create_artist(db, body)
-    full = await artist_service.get_artist_by_id(db, created.id)
-    if full is None:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    return _artist_to_read(full)
+    artist = await artist_service.create_artist(db, body)
+    return _artist_to_read(artist)
+
+@router.get("/by-discord/{discord_user_id}", response_model=ArtistRead)
+async def get_artist_by_discord_id(
+        discord_user_id: str,
+        db: DBSession,
+        _auth: BotAuth,
+        server_id: uuid.UUID = Query(...)
+) -> ArtistRead:
+    artist = await artist_service.get_artist_by_discord_id(db, discord_user_id, server_id)
+    return _artist_to_read(artist)
 
 @router.get("/{artist_id}", response_model=ArtistRead)
 async def get_artist(
@@ -69,9 +76,7 @@ async def get_artist(
         db: DBSession,
         _auth: BotAuth
 ) -> ArtistRead:
-    artist = await artist_service.get_artist_by_id(db, artist_id)
-    if artist is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
+    artist = await artist_service.get_artist(db, artist_id)
     return _artist_to_read(artist)
 
 @router.get("/{artist_id}/active-commission-count", response_model=ArtistCommissionCapacity)
@@ -80,10 +85,7 @@ async def active_commission_count(
         db: DBSession,
         _auth: BotAuth
 ) -> ArtistCommissionCapacity:
-    cap = await artist_service.get_artist_commission_capacity(db, artist_id)
-    if cap is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
-    count, max_commissions = cap
+    count, max_commissions = await artist_service.get_artist_commission_capacity(db, artist_id)
     return ArtistCommissionCapacity(count=count, max=max_commissions)
 
 @router.patch("/{artist_id}", response_model=ArtistRead)
@@ -93,13 +95,8 @@ async def update_artist(
         db: DBSession,
         _auth: BotAuth
 ) -> ArtistRead:
-    updated = await artist_service.update_artist(db, artist_id, body)
-    if updated is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found.")
-    full = await artist_service.get_artist_by_id(db, artist_id)
-    if full is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found.")
-    return _artist_to_read(full)
+    artist = await artist_service.update_artist(db, artist_id, body)
+    return _artist_to_read(artist)
 
 
 # Helpers
@@ -125,6 +122,7 @@ def _artist_to_read(artist: Artist) -> ArtistRead:
         rating_count=artist.rating_count,
         status=artist.status,
         tos_text=artist.tos_text,
+        tos_hash=artist_service.tos_hash(artist.tos_text) if artist.tos_text else None,
         gcash_number=artist.gcash_number,
         paypal_email=artist.paypal_email,
     )
