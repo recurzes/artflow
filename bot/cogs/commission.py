@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
 import logging
 import re
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import PurePosixPath
 from typing import Any
 
 import discord
@@ -14,7 +16,6 @@ from bot.utils.api_client import APIError
 from bot.utils.embeds import (
     base_embed,
     completed_work_embed,
-    error_embed,
     payment_instructions_embed,
     public_review_embed,
     success_embed,
@@ -22,7 +23,14 @@ from bot.utils.embeds import (
 )
 from bot.utils.replies import reply_error, reply_success
 from bot.utils.tickets import TicketError, create_commission_ticket, ticket_commission
-from bot.utils.uploads import MAX_RECEIPT_BYTES, RECEIPT_TYPES, check_attachment, is_image
+from bot.utils.uploads import (
+    IMAGE_TYPES,
+    MAX_ARTWORK_BYTES,
+    MAX_RECEIPT_BYTES,
+    RECEIPT_TYPES,
+    check_attachment,
+    is_image,
+)
 from shared.exchange_rates import php_to_usd
 from shared.storage import upload_delivery_file, upload_receipt, upload_wip_image
 
@@ -204,41 +212,102 @@ def tos_accept_view(tos_hash: str) -> discord.ui.View:
     return view
 
 
-async def _maybe_post_completed_works(
+# Completion and reviews
+
+def _settings_channel(
         guild: discord.Guild,
         settings: dict[str, Any],
-        comm: dict[str, Any],
-        artist: dict[str, Any]
+        key: str
+) -> discord.TextChannel | None:
+    """A channel the server configured by ID, if it still exists."""
+    channel_id = settings.get(key)
+    if not channel_id:
+        return None
+    channel = guild.get_channel(int(channel_id))
+    return channel if isinstance(channel, discord.TextChannel) else None
+
+
+def _attached(raw: bytes, original_name: str, stem: str) -> tuple[discord.File, str]:
+    """A file to post in the channel, under a name that is safe to reference
+    from an embed (`attachment://...` breaks on spaces and odd characters)."""
+    suffix = PurePosixPath(original_name).suffix.lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,8}", suffix):
+        suffix = ""
+    name = f"{stem}{suffix}"
+    return discord.File(io.BytesIO(raw), filename=name), name
+
+
+async def announce_completed(
+        api: Any,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        comm: dict[str, Any]
 ) -> None:
+    """Tell the ticket the commission is done, invite a review, and show the
+    piece in the completed-works channel (never for NSFW commissions)."""
+    await channel.send(
+        content=f"<@{comm['client_discord_user_id']}>",
+        embed=success_embed(
+            "Commission completed. Thank you!",
+            "Client: share feedback with **Leave a review** below or `/review`"
+        ),
+        view=ReviewPromptView()
+    )
     if comm.get("is_nsfw"):
         return
-    cid = settings.get("channel_completed_workds")
-    if not cid:
-        return
-    ch = guild.get_channel(int(cid))
-    if not isinstance(ch, discord.TextChannel):
-        return
-    embed = completed_work_embed(
-        artist_name=artist.get("display_name", "Artist"),
-        commission_id_display=str(comm.get("id", "")),
-        delivery_file_url=comm.get("delivery_file_url"),
-    )
-    await ch.send(embed=embed)
+    try:
+        server = await api.get_server(guild.id)
+        showcase = _settings_channel(guild, server.get("settings") or {}, "channel_completed_works")
+        if showcase is None:
+            return
+        artist = await api.get_artist(comm["artist_id"])
+        await showcase.send(
+            embed=completed_work_embed(
+                artist_name=artist.get("display_name", "Artist"),
+                commission_id_display=str(comm.get("id", "")),
+                delivery_file_url=comm.get("delivery_file_url"),
+            )
+        )
+    except (APIError, discord.HTTPException):
+        logger.exception("Could not post commission %s to completed works", comm.get("id"))
 
-async def _maybe_post_public_review(
-        guild: discord.Guild,
-        settings: dict[str, Any],
-        artist_name: str,
+
+async def submit_review(
+        interaction: discord.Interaction,
+        comm: dict[str, Any],
         rating: int,
         body: str | None
 ) -> None:
-    cid = settings.get("channel_reviews")
-    if not cid:
+    """Save the client's review and publish it. Shared by the modal and `/review`."""
+    api = interaction.client.api
+    try:
+        await api.review(comm["id"], reviewer_id=comm["client_id"], rating=rating, body=body)
+    except APIError as exc:
+        await reply_error(interaction, exc.detail)
         return
-    ch = guild.get_channel(int(cid))
-    if not isinstance(ch, discord.TextChannel):
+    await reply_success(interaction, "Thank you for your review!")
+
+    if comm.get("is_nsfw") or interaction.guild is None:
         return
-    await ch.send(embed=public_review_embed(artist_name=artist_name, rating=rating, body=body))
+    # The review is saved; failing to publish it must not look like a failed review.
+    try:
+        server = await api.get_server(interaction.guild.id)
+        reviews = _settings_channel(
+            interaction.guild, server.get("settings") or {}, "channel_reviews"
+        )
+        if reviews is None:
+            return
+        artist = await api.get_artist(comm["artist_id"])
+        await reviews.send(
+            embed=public_review_embed(
+                artist_name=artist.get("display_name", "Artist"),
+                rating=rating,
+                body=body
+            )
+        )
+    except (APIError, discord.HTTPException):
+        logger.exception("Could not publish the review for commission %s", comm.get("id"))
+
 
 class IntakeModal(discord.ui.Modal, title="Commission intake"):
     brief = discord.ui.TextInput(
@@ -358,105 +427,46 @@ class ReviewModal(discord.ui.Modal, title="Leave a review"):
         required=False
     )
 
-    def __init__(
-            self,
-            bot: commands.Bot,
-            commission_id: str,
-            reviewer_uuid: str,
-            guild: discord.Guild,
-            server_settings: dict[str, Any],
-            artist_name: str,
-            is_nsfw: bool = False
-    ) -> None:
+    def __init__(self, commission: dict[str, Any]) -> None:
         super().__init__()
-        self.bot = bot
-        self.commission_id = commission_id
-        self.reviewer_uuid = reviewer_uuid
-        self.guild = guild
-        self.server_settings = server_settings
-        self.artist_name = artist_name
-        self.is_nsfw = is_nsfw
+        self.commission = commission
 
     async def on_submit(self, interaction: Interaction) -> None:
         raw = self.rating.value.strip()
         if not re.match(r"^[1-5]$", raw):
-            await interaction.response.send_message(
-                embed=error_embed("Rating my be a single digit 1–5"),
-                ephemeral=True
-            )
+            await reply_error(interaction, "Rating must be a single digit from 1 to 5")
             return
-        rating = int(raw)
-        try:
-            await self.bot.api.review(
-                self.commission_id,
-                reviewer_id=self.reviewer_uuid,
-                rating=rating,
-                body=self.comment.value or None
-            )
-            await interaction.response.send_message(
-                embed=success_embed("Thank you for your review!"),
-                ephemeral=True
-            )
-            if not self.is_nsfw:
-                await _maybe_post_public_review(
-                    self.guild,
-                    self.server_settings,
-                    self.artist_name,
-                    rating,
-                    self.comment.value or None
-                )
-        except APIError as exc:
-            await interaction.response.send_message(
-                embed=error_embed(f"Review failed: {exc.detail}"),
-                ephemeral=True
-            )
+        await submit_review(interaction, self.commission, int(raw), self.comment.value or None)
 
 
 class ReviewPromptView(discord.ui.View):
-    def __init__(
-            self,
-            bot: commands.Bot,
-            commission_id: str,
-            review_uuid: str,
-            client_discord_id: int,
-            guild: discord.Guild,
-            server_settings: dict[str, Any],
-            artist_name: str,
-            is_nsfw: bool = False
-    ) -> None:
-        super().__init__(timeout=86400)
-        self.bot = bot
-        self.commission_id = commission_id
-        self.reviewer_uuid = review_uuid
-        self.client_discord_id = client_discord_id
-        self.guild = guild
-        self.server_settings = server_settings
-        self.artist_name = artist_name
-        self.is_nsfw = is_nsfw
+    """Posted when a commission completes. Stateless and registered at startup."""
 
-    @discord.ui.button(label="Leave a review", style=discord.ButtonStyle.success)
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Leave a review",
+        style=discord.ButtonStyle.success,
+        custom_id="artflow:review_open"
+    )
     async def review_btn(
             self,
             interaction: discord.Interaction,
             button: discord.ui.Button
     ) -> None:
-        if interaction.user.id != self.client_discord_id:
-            await interaction.response.send_message(
-                "Only the client can leave a review",
-                ephemeral=True
+        try:
+            comm = await ticket_commission(interaction, only="client", action="leave a review")
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
+            return
+        if comm["status"] != "COMPLETED":
+            await reply_error(
+                interaction,
+                f"A commission can be reviewed once it is completed (it is {_status_label(comm)})"
             )
             return
-        await interaction.response.send_modal(
-            ReviewModal(
-                self.bot,
-                self.commission_id,
-                self.reviewer_uuid,
-                self.guild,
-                self.server_settings,
-                self.artist_name,
-                is_nsfw=self.is_nsfw
-            )
-        )
+        await interaction.response.send_modal(ReviewModal(comm))
 
 
 class QuoteActionsView(discord.ui.View):
@@ -935,34 +945,46 @@ class CommissionCog(commands.Cog, name="Commissions"):
             note: str = ""
     ) -> None:
         await interaction.response.defer(ephemeral=True)
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
-            return
         try:
-            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
-            artist = await self.bot.api.get_artist(comm['artist_id'])
-            if str(interaction.user.id) != artist["discord_user_id"]:
-                await interaction.followup.send(embed=error_embed("Only the artist can post WIP"))
-                return
+            comm = await ticket_commission(interaction, only="artist", action="post a WIP update")
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
+            return
+
+        if comm["status"] not in ("IN_PROGRESS", "WIP"):
+            await reply_error(
+                interaction,
+                "WIP updates start once payment is confirmed "
+                f"(the commission is {_status_label(comm)})"
+            )
+            return
+        problem = check_attachment(image, allowed_types=IMAGE_TYPES, max_bytes=MAX_ARTWORK_BYTES)
+        if problem:
+            await reply_error(interaction, problem)
+            return
+
+        try:
             raw = await image.read()
             url = await upload_wip_image(raw, image.filename, str(comm["id"]), watermarked=False)
-            await self.bot.api.post_wip(comm['id'], url, note or None)
-            try:
-                from workers.celery_app import celery_app
-
-                celery_app.send_task(
-                    "images.apply_watermark",
-                    args=[str(comm["id"]), url]
-                )
-            except Exception:
-                logger.exception("Could not queue watermark task")
-
-            await interaction.channel.send(
-                embed=base_embed(title="Work in progress", description=note or "")
-            )
-            await interaction.followup.send(embed=success_embed("WIP recorded"), ephemeral=True)
+            await self.bot.api.post_wip(comm["id"], url, note or None)
         except APIError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
+            await reply_error(interaction, exc.detail)
+            return
+        except Exception:
+            logger.exception("Could not store the WIP image for commission %s", comm["id"])
+            await reply_error(interaction, "The image could not be stored. Please try again")
+            return
+
+        # The image itself is posted in the ticket, so the client sees it here.
+        file, name = _attached(raw, image.filename, "wip")
+        embed = base_embed(title="Work in progress", description=note or "")
+        embed.set_image(url=f"attachment://{name}")
+        await interaction.channel.send(
+            content=f"<@{comm['client_discord_user_id']}>",
+            embed=embed,
+            file=file
+        )
+        await reply_success(interaction, "WIP posted")
 
     @app_commands.command(
         name="deliver",
@@ -975,27 +997,56 @@ class CommissionCog(commands.Cog, name="Commissions"):
             file: discord.Attachment
     ) -> None:
         await interaction.response.defer(ephemeral=True)
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
-            return
         try:
-            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
-            artist = await self.bot.api.get_artist(comm['artist_id'])
-            if str(interaction.user.id) != artist["discord_user_id"]:
-                await interaction.followup.send(embed=error_embed("Only the artist can deliver"))
-                return
+            comm = await ticket_commission(interaction, only="artist", action="deliver")
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
+            return
+
+        if comm["status"] == "IN_PROGRESS":
+            await reply_error(
+                interaction,
+                "Post at least one WIP update with `/wip` before delivering the final file"
+            )
+            return
+        if comm["status"] != "WIP":
+            await reply_error(
+                interaction,
+                f"There is nothing to deliver right now (the commission is {_status_label(comm)})"
+            )
+            return
+        # A final delivery may be a PSD, a zip of layers, a video...
+        problem = check_attachment(file, allowed_types=None, max_bytes=MAX_ARTWORK_BYTES)
+        if problem:
+            await reply_error(interaction, problem)
+            return
+
+        try:
             raw = await file.read()
             url = await upload_delivery_file(raw, file.filename, str(comm["id"]))
-            await self.bot.api.deliver(comm['id'], url)
-            await interaction.channel.send(
-                embed=success_embed(
-                    "Delivery posted",
-                    "Client: use `/complete` to accept, or wait for auto-accept"
-                )
-            )
-            await interaction.followup.send(embed=success_embed("Delivered"), ephemeral=True)
+            delivered = await self.bot.api.deliver(comm["id"], url)
         except APIError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
+            await reply_error(interaction, exc.detail)
+            return
+        except Exception:
+            logger.exception("Could not store the delivery for commission %s", comm["id"])
+            await reply_error(interaction, "The file could not be stored. Please try again")
+            return
+
+        auto_accept = _discord_time(delivered.get("delivery_auto_accept_at"))
+        description = "Client: use `/complete` to accept it, or `/dispute` if something is wrong."
+        if auto_accept:
+            description += f"\nIt is accepted automatically {auto_accept} otherwise."
+        attachment, name = _attached(raw, file.filename, "final")
+        embed = success_embed("Final delivery", description)
+        if is_image(file):
+            embed.set_image(url=f"attachment://{name}")
+        await interaction.channel.send(
+            content=f"<@{comm['client_discord_user_id']}>",
+            embed=embed,
+            file=attachment
+        )
+        await reply_success(interaction, "Delivered")
 
     @app_commands.command(
         name="complete",
@@ -1003,49 +1054,18 @@ class CommissionCog(commands.Cog, name="Commissions"):
     )
     async def complete_cmd(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
-        if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
-            return
         try:
-            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
-            client = await self.bot.api.get_user(interaction.user.id)
-            if client["id"] != comm["client_id"]:
-                await interaction.followup.send(embed=error_embed("Only the client can complete"))
-                return
-            await self.bot.api.complete(comm['id'])
-            comm_done = await self.bot.api.get_commission(comm['id'])
-            artist = await self.bot.api.get_artist(comm['artist_id'])
-            server = await self.bot.api.get_server(interaction.guild.id)
-            settings = server.get("settings") or {}
-            if isinstance(settings, dict):
-                await _maybe_post_completed_works(
-                    interaction.guild,
-                    settings,
-                    comm_done,
-                    artist
-                )
-
-            await interaction.channel.send(embed=success_embed("Commissions completed. Thank you!"))
-            is_nsfw = bool(comm_done.get("is_nsfw"))
-            await interaction.channel.send(
-                embed=base_embed(
-                    title="Leave a review",
-                    description="Share feedback with **Leave a review** below or `/review`"
-                ),
-                view=ReviewPromptView(
-                    self.bot,
-                    str(comm["id"]),
-                    str(client["id"]),
-                    interaction.user.id,
-                    interaction.guild,
-                    settings,
-                    artist.get("display_name", "Artist"),
-                    is_nsfw=is_nsfw
-                )
-            )
-            await interaction.followup.send(embed=success_embed("Marked complete"), ephemeral=True)
+            comm = await ticket_commission(interaction, only="client", action="accept the delivery")
+            completed = await self.bot.api.complete(comm["id"])
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
+            return
         except APIError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
+            await reply_error(interaction, exc.detail)
+            return
+
+        await announce_completed(self.bot.api, interaction.guild, interaction.channel, completed)
+        await reply_success(interaction, "Marked complete")
 
     @app_commands.command(
         name="review",
@@ -1059,38 +1079,12 @@ class CommissionCog(commands.Cog, name="Commissions"):
             comment: str = ""
     ) -> None:
         await interaction.response.defer(ephemeral=True)
-        if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
-            return
         try:
-            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
-            client = await self.bot.api.get_user(interaction.user.id)
-            if client["id"] != comm["client_id"]:
-                await interaction.followup.send(embed=error_embed("Only the client can review"))
-                return
-            await self.bot.api.review(
-                comm["id"],
-                reviewer_id=client["id"],
-                rating=rating,
-                body=comment or None
-            )
-            artist = await self.bot.api.get_artist(comm['artist_id'])
-            server = await self.bot.api.get_server(interaction.guild.id)
-            settings = server.get("settings") or {}
-            if isinstance(settings, dict) and not comm.get("is_nsfw"):
-                await _maybe_post_completed_works(
-                    interaction.guild,
-                    settings,
-                    artist.get("display_name", "Artist"),
-                    rating,
-                    comment or None
-                )
-            await interaction.followup.send(
-                embed=success_embed("Thank you for your review!"),
-                ephemeral=True
-            )
-        except APIError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
+            comm = await ticket_commission(interaction, only="client", action="leave a review")
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
+            return
+        await submit_review(interaction, comm, rating, comment or None)
 
     @app_commands.command(
         name="revision",
@@ -1107,4 +1101,5 @@ async def setup(bot: commands.Bot) -> None:
     # Persistent views: their buttons keep working after a restart.
     bot.add_view(IntakeOpenView())
     bot.add_view(QuoteActionsView())
+    bot.add_view(ReviewPromptView())
     bot.add_dynamic_items(TosAcceptButton)
