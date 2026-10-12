@@ -4,8 +4,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.common import TimestampSchema
 from shared.models.artist import ArtistStatus
-from shared.schemas.common import TimestampSchema
 
 
 class ArtistApplication(BaseModel):

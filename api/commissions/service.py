@@ -8,7 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from api.services import artist_service
+from api.artists import service as artist_service
+from api.commissions.schemas import (
+    CommissionCreate,
+    QuoteCreate,
+    WipCreateBody,
+)
 from shared import storage
 from shared.errors import Conflict, Forbidden, InvalidState, NotFound
 from shared.models.artist import Artist, ArtistStatus
@@ -16,11 +21,6 @@ from shared.models.commission import Commission, CommissionStatus, PaymentMethod
 from shared.models.server import Server
 from shared.models.user import User
 from shared.models.wip_update import WipUpdate
-from shared.schemas.commission import (
-    CommissionCreate,
-    QuoteCreate,
-    WipCreateBody,
-)
 
 PAYMENT_WINDOW_HOURS = 24
 DELIVERY_AUTO_ACCEPT_HOURS = 48

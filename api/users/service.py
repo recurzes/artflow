@@ -4,9 +4,9 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.users.schemas import Verify18Submit
 from shared.errors import NotFound
 from shared.models.user import User
-from shared.schemas.user import Verify18Submit
 
 MIN_DISCORD_ACCOUNT_AGE_DAYS = 90
 _AGE_VERIFY_PENDING_PREFIX = "age_verify_pending:"

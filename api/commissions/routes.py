@@ -3,10 +3,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, status
 
-from api.dependencies import BotAuth, DBSession
-from api.services import commission_service, review_service
-from shared.models.commission import PaymentMethod
-from shared.schemas.commission import (
+from api.commissions import service as commission_service
+from api.commissions.schemas import (
     CommissionCreate,
     CommissionFiles,
     CommissionRead,
@@ -19,7 +17,8 @@ from shared.schemas.commission import (
     TosAcceptBody,
     WipCreateBody,
 )
-from shared.schemas.review import ReviewCreate, ReviewRead
+from api.dependencies import BotAuth, DBSession
+from shared.models.commission import PaymentMethod
 
 router = APIRouter(prefix="/commissions", tags=["commissions"])
 
@@ -220,17 +219,3 @@ async def cancel(
 ) -> CommissionRead:
     comm = await commission_service.cancel_commission(db, commission_id)
     return CommissionRead.model_validate(comm)
-
-@router.post(
-    "/{commission_id}/review",
-    response_model=ReviewRead,
-    status_code=status.HTTP_201_CREATED
-)
-async def create_commission_review(
-        commission_id: uuid.UUID,
-        body: ReviewCreate,
-        db: DBSession,
-        _auth: BotAuth
-) -> ReviewRead:
-    review = await review_service.create_review(db, commission_id, body)
-    return ReviewRead.model_validate(review)

@@ -7,13 +7,13 @@ from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from api.services import user_service
+from api.artists.schemas import ArtistApplication, ArtistUpdate
+from api.users import service as user_service
 from shared.errors import Conflict, InvalidState, NotFound
 from shared.models.artist import Artist, ArtistStatus
 from shared.models.commission import Commission, CommissionStatus
 from shared.models.server import Server
 from shared.models.user import User
-from shared.schemas.artist import ArtistApplication, ArtistUpdate
 
 _TERMINAL_COMMISSION_STATUSES = (CommissionStatus.COMPLETED, CommissionStatus.CANCELLED)
 

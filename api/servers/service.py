@@ -1,9 +1,9 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.servers.schemas import ServerCreate, ServerPatch, ServerSettings
 from shared.errors import NotFound
 from shared.models.server import Server
-from shared.schemas.server import ServerCreate, ServerPatch, ServerSettings
 
 
 async def get_server_by_discord_guild_id(

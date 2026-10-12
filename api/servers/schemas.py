@@ -2,8 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from api.common import TimestampSchema
 from shared.models.server import SubscriptionTier
-from shared.schemas.common import TimestampSchema
 
 
 class ServerSettings(BaseModel):

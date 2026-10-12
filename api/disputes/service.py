@@ -6,12 +6,13 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.services import commission_service, user_service
+from api.commissions import service as commission_service
+from api.disputes.schemas import DisputeCreate, DisputeResolve
+from api.users import service as user_service
 from shared.errors import Conflict, Forbidden, InvalidState, NotFound
 from shared.models.artist import Artist
 from shared.models.commission import CommissionStatus
 from shared.models.dispute import Dispute, DisputeStatus
-from shared.schemas.dispute import DisputeCreate, DisputeResolve
 
 
 def _utcnow() -> datetime:

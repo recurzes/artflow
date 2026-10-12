@@ -7,9 +7,15 @@ from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from api.admin.routes import router as admin_router
+from api.artists.routes import router as artists_router
+from api.commissions.routes import router as commissions_router
 from api.dependencies import limiter
+from api.disputes.routes import router as disputes_router
 from api.errors import register_error_handlers
-from api.routers import admin, artists, commissions, disputes, servers, users
+from api.reviews.routes import router as reviews_router
+from api.servers.routes import router as servers_router
+from api.users.routes import router as users_router
 from shared.config import settings
 from shared.db import dispose_engine
 from shared.redis import close_pool, get_pool
@@ -55,12 +61,13 @@ def create_app() -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     register_error_handlers(app)
 
-    app.include_router(users.router)
-    app.include_router(artists.router)
-    app.include_router(commissions.router)
-    app.include_router(disputes.router)
-    app.include_router(servers.router)
-    app.include_router(admin.router)
+    app.include_router(users_router)
+    app.include_router(artists_router)
+    app.include_router(commissions_router)
+    app.include_router(reviews_router)
+    app.include_router(disputes_router)
+    app.include_router(servers_router)
+    app.include_router(admin_router)
 
     @app.get("/health", tags=["health"])
     async def health() -> dict:

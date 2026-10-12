@@ -3,10 +3,8 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Query, status
 
-from api.dependencies import BotAuth, DBSession
-from api.services import artist_service
-from shared.models.artist import Artist
-from shared.schemas.artist import (
+from api.artists import service as artist_service
+from api.artists.schemas import (
     ArtistApplication,
     ArtistApproval,
     ArtistCommissionCapacity,
@@ -15,6 +13,8 @@ from shared.schemas.artist import (
     ArtistRejection,
     ArtistUpdate,
 )
+from api.dependencies import BotAuth, DBSession
+from shared.models.artist import Artist
 
 router = APIRouter(prefix="/artists", tags=["artists"])
 
