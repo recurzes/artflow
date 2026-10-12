@@ -1,9 +1,10 @@
+import uuid
 from datetime import datetime, timezone
 
 from redis.asyncio import Redis
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.users import repository
 from api.users.schemas import Verify18Submit
 from shared.errors import NotFound
 from shared.models.user import User
@@ -26,16 +27,21 @@ def _account_age_days(created_at: datetime | None) -> int | None:
     return max(0, delta.days)
 
 
+async def get_user(db: AsyncSession, user_id: uuid.UUID) -> User:
+    user = await repository.get_by_id(db, user_id)
+    if user is None:
+        raise NotFound("User not found")
+    return user
+
+
 async def get_user_by_discord_id(
         db: AsyncSession, discord_user_id: str
 ) -> User | None:
-    return await db.scalar(
-        select(User).where(User.discord_user_id == discord_user_id)
-    )
+    return await repository.get_by_discord_id(db, discord_user_id)
 
 
 async def require_user_by_discord_id(db: AsyncSession, discord_user_id: str) -> User:
-    user = await get_user_by_discord_id(db, discord_user_id)
+    user = await repository.get_by_discord_id(db, discord_user_id)
     if user is None:
         raise NotFound("User not found")
     return user
@@ -47,16 +53,16 @@ async def upsert_user(
         discord_user_id: str,
         discord_account_created_at: datetime | None = None
 ) -> User:
-    user = await get_user_by_discord_id(db, discord_user_id)
+    user = await repository.get_by_discord_id(db, discord_user_id)
     if user is None:
-        user = User(
+        return await repository.create(
+            db,
             discord_user_id=discord_user_id,
             discord_account_created_at=discord_account_created_at
         )
-        db.add(user)
-    elif discord_account_created_at is not None:
+    if discord_account_created_at is not None:
         user.discord_account_created_at = discord_account_created_at
-    await db.flush()
+        await db.flush()
     return user
 
 
