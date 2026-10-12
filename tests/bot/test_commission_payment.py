@@ -188,7 +188,7 @@ class TestPaymentEmbed:
 class TestPay:
     @pytest.fixture
     def upload(self, monkeypatch):
-        upload = AsyncMock(return_value="https://storage/receipt.png")
+        upload = AsyncMock(return_value="receipts/commission-uuid/abc.png")
         monkeypatch.setattr(cog, "upload_receipt", upload)
         return upload
 
@@ -202,11 +202,14 @@ class TestPay:
         await self._pay(interaction, _attachment())
 
         upload.assert_awaited_once()
+        # what is recorded is the storage key, never a link that expires
         api.upload_receipt.assert_awaited_once_with(
-            "commission-uuid", "https://storage/receipt.png"
+            "commission-uuid", "receipts/commission-uuid/abc.png"
         )
-        assert sent_embeds(channel)[0].image.url == "https://storage/receipt.png"
-        assert channel.send.await_args.kwargs["content"] == f"<@{ARTIST_ID}>"
+        sent = channel.send.await_args.kwargs
+        assert sent["file"].filename == "receipt.png"
+        assert sent["embed"].image.url == "attachment://receipt.png"
+        assert sent["content"] == f"<@{ARTIST_ID}>"
 
     async def test_nothing_is_stored_before_the_terms_are_accepted(self, upload):
         interaction, api, _ = _scene(CLIENT_ID, "TOS_PENDING")

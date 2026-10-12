@@ -100,7 +100,7 @@ class Commission(Base, TimestampMixin):
 
     # Payment
     payment_method: Mapped[PaymentMethod | None] = mapped_column(nullable=True)
-    payment_receipt_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payment_receipt_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     payment_confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True
@@ -139,7 +139,7 @@ class Commission(Base, TimestampMixin):
         default=False,
         nullable=False
     )
-    delivery_file_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivery_file_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     delivery_auto_accept_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True

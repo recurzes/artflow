@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from bot.utils.api_client import APIClient, APIError
+from shared import storage
 from tests.conftest import make_discord_id
 
 TOS = "Half up front, no refunds after the sketch."
@@ -100,7 +101,11 @@ async def test_artists(bot_api):
     assert rejected["status"] == "REJECTED"
 
 
-async def test_commission_lifecycle_disputes_and_admin(bot_api):
+async def _fake_signed_url(bucket: str, key: str, expires_in: int = 3600) -> str:
+    return f"https://signed.example/{bucket}/{key}"
+
+
+async def test_commission_lifecycle_disputes_and_admin(bot_api, monkeypatch):
     server, artist_user, buyer, artist = await _setup(bot_api)
     channel_id = make_discord_id()
 
@@ -117,7 +122,7 @@ async def test_commission_lifecycle_disputes_and_admin(bot_api):
     await bot_api.quote(cid, price_php="1300.00")
     assert (await bot_api.accept_quote(cid))["status"] == "TOS_PENDING"
     assert (await bot_api.accept_tos(cid, artist["tos_hash"]))["status"] == "PAYMENT_PENDING"
-    assert (await bot_api.upload_receipt(cid, "receipts/a.png"))["payment_receipt_url"]
+    assert (await bot_api.upload_receipt(cid, "receipts/a.png"))["payment_receipt_key"]
     assert (await bot_api.confirm_payment(cid))["status"] == "IN_PROGRESS"
     assert (await bot_api.post_wip(cid, "wip/a.png", "sketch"))["status"] == "WIP"
     assert (await bot_api.deliver(cid, "wip/final.png"))["status"] == "DELIVERED"
@@ -129,6 +134,11 @@ async def test_commission_lifecycle_disputes_and_admin(bot_api):
     assert (await bot_api.admin_commission_summary(server["id"]))["by_status"] == {
         "DELIVERED": 1
     }
+
+    monkeypatch.setattr(storage, "get_signed_url", _fake_signed_url)
+    files = await bot_api.get_commission_files(cid)
+    assert files["receipt_url"] == "https://signed.example/receipts/a.png"
+    assert files["delivery_url"] == "https://signed.example/wip/final.png"
 
     assert (await bot_api.complete(cid))["status"] == "COMPLETED"
     assert (await bot_api.get_commission(cid))["completed_at"] is not None

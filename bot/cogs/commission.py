@@ -35,6 +35,7 @@ from bot.utils.uploads import (
     MAX_RECEIPT_BYTES,
     RECEIPT_TYPES,
     check_attachment,
+    download,
     is_image,
 )
 from shared.exchange_rates import php_to_usd
@@ -243,6 +244,25 @@ def _attached(raw: bytes, original_name: str, stem: str) -> tuple[discord.File, 
     return discord.File(io.BytesIO(raw), filename=name), name
 
 
+async def _showcase_file(api: Any, comm: dict[str, Any]) -> discord.File | None:
+    """The delivered piece as an attachment, when it is an image.
+
+    Attached rather than linked: the stored file is only reachable through
+    links that expire, and a showcase post should not.
+    """
+    key = comm.get("delivery_file_key") or ""
+    suffix = PurePosixPath(key.split("?", maxsplit=1)[0]).suffix.lower()
+    if suffix not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        return None
+    files = await api.get_commission_files(comm["id"])
+    if not files.get("delivery_url"):
+        return None
+    raw = await download(files["delivery_url"])
+    if raw is None:
+        return None
+    return _attached(raw, key, "completed")[0]
+
+
 async def announce_completed(
         api: Any,
         guild: discord.Guild,
@@ -269,12 +289,14 @@ async def announce_completed(
         if showcase is None:
             return
         artist = await api.get_artist(comm["artist_id"])
+        piece = await _showcase_file(api, comm)
         await showcase.send(
             embed=completed_work_embed(
                 artist_name=artist.get("display_name", "Artist"),
                 commission_id_display=str(comm.get("id", "")),
-                delivery_file_url=comm.get("delivery_file_url"),
-            )
+                image_filename=piece.filename if piece else None,
+            ),
+            **({"file": piece} if piece else {})
         )
     except (APIError, discord.HTTPException):
         logger.exception("Could not post commission %s to completed works", comm.get("id"))
@@ -892,8 +914,9 @@ class CommissionCog(commands.Cog, name="Commissions"):
             return
 
         try:
-            url = await upload_receipt(await receipt.read(), receipt.filename, str(comm["id"]))
-            await self.bot.api.upload_receipt(comm["id"], url)
+            raw = await receipt.read()
+            key = await upload_receipt(raw, receipt.filename, str(comm["id"]))
+            await self.bot.api.upload_receipt(comm["id"], key)
         except APIError as exc:
             await reply_error(interaction, exc.detail)
             return
@@ -906,13 +929,15 @@ class CommissionCog(commands.Cog, name="Commissions"):
             "Receipt uploaded",
             "Artist: check the receipt and run `/confirm-payment` once the funds arrive"
         )
+        # The receipt is posted in the ticket itself, where both parties and any
+        # moderator handling a dispute can see it for as long as the channel exists.
+        file, name = _attached(raw, receipt.filename, "receipt")
         if is_image(receipt):
-            embed.set_image(url=url)
-        else:
-            embed.add_field(name="Receipt", value=f"[Open file]({url})", inline=False)
+            embed.set_image(url=f"attachment://{name}")
         await interaction.channel.send(
             content=f"<@{comm['artist_discord_user_id']}>",
-            embed=embed
+            embed=embed,
+            file=file
         )
         await reply_success(interaction, "Receipt submitted")
 
@@ -973,8 +998,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
 
         try:
             raw = await image.read()
-            url = await upload_wip_image(raw, image.filename, str(comm["id"]), watermarked=False)
-            await self.bot.api.post_wip(comm["id"], url, note or None)
+            key = await upload_wip_image(raw, image.filename, str(comm["id"]), watermarked=False)
+            await self.bot.api.post_wip(comm["id"], key, note or None)
         except APIError as exc:
             await reply_error(interaction, exc.detail)
             return
@@ -1031,8 +1056,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
 
         try:
             raw = await file.read()
-            url = await upload_delivery_file(raw, file.filename, str(comm["id"]))
-            delivered = await self.bot.api.deliver(comm["id"], url)
+            key = await upload_delivery_file(raw, file.filename, str(comm["id"]))
+            delivered = await self.bot.api.deliver(comm["id"], key)
         except APIError as exc:
             await reply_error(interaction, exc.detail)
             return

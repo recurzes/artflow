@@ -21,8 +21,8 @@ class WipUpdate(Base, TimestampMixin):
         ForeignKey("commissions.id", ondelete="CASCADE"),
         nullable=False
     )
-    image_url: Mapped[str] = mapped_column(Text, nullable=False)
-    watermarked_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_key: Mapped[str] = mapped_column(Text, nullable=False)
+    watermarked_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     artist_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships

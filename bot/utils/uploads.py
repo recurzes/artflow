@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import discord
+import httpx
 
 MB = 1024 * 1024
 MAX_RECEIPT_BYTES = 10 * MB
@@ -38,3 +39,14 @@ def check_attachment(
 def is_image(attachment: discord.Attachment) -> bool:
     content_type = (attachment.content_type or "").split(";")[0].strip().lower()
     return content_type in IMAGE_TYPES
+
+
+async def download(url: str, *, max_bytes: int = MAX_ARTWORK_BYTES) -> bytes | None:
+    """Fetch a stored file through its signed link; None if it cannot be had."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as http:
+            response = await http.get(url)
+            response.raise_for_status()
+    except httpx.HTTPError:
+        return None
+    return response.content if len(response.content) <= max_bytes else None
