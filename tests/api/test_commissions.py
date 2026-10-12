@@ -141,6 +141,12 @@ ACTIONS: dict[str, tuple[str, dict | None, set[S], S | None]] = {
     "wip-update": ("wip-update", {"image_url": "wip/abc.png"}, {S.IN_PROGRESS, S.WIP}, S.WIP),
     "deliver": ("deliver", {"final_file_url": "wip/final.png"}, {S.WIP}, S.DELIVERED),
     "complete": ("complete", None, {S.DELIVERED}, S.COMPLETED),
+    "cancel": (
+        "cancel",
+        None,
+        {S.INQUIRY, S.INTAKE, S.QUOTED, S.TOS_PENDING, S.PAYMENT_PENDING},
+        S.CANCELLED,
+    ),
 }
 
 
@@ -256,11 +262,39 @@ async def test_complete_records_the_platform_fee(client, db):
     assert data["completed_at"] is not None
 
 
+async def test_cancel_is_refused_once_a_receipt_is_uploaded(client, db):
+    commission = await make_commission(
+        db, status=S.PAYMENT_PENDING, payment_receipt_url="receipts/abc.png"
+    )
+
+    response = await client.post(f"/commissions/{commission.id}/cancel")
+
+    assert response.status_code == 409
+    assert "dispute" in response.json()["detail"]
+
+
+async def test_cancelled_commission_frees_the_artists_slot(client, db):
+    artist = await make_artist(db, max_active_commissions=1)
+    first, second = await make_user(db), await make_user(db)
+    created = (await client.post("/commissions", json=_create_body(artist, first))).json()
+
+    await client.post(f"/commissions/{created['id']}/cancel")
+
+    retry = await client.post("/commissions", json=_create_body(artist, second))
+    assert retry.status_code == 201, retry.text
+
+
 async def test_lookup_by_ticket_channel(client, db):
-    commission = await make_commission(db, discord_ticket_channel_id="555000111222333444")
+    artist_user, buyer = await make_user(db), await make_user(db)
+    artist = await make_artist(db, user=artist_user)
+    commission = await make_commission(
+        db, artist=artist, client=buyer, discord_ticket_channel_id="555000111222333444"
+    )
 
     found = await client.get("/commissions/by-discord-channel/555000111222333444")
     assert found.json()["id"] == str(commission.id)
+    assert found.json()["client_discord_user_id"] == buyer.discord_user_id
+    assert found.json()["artist_discord_user_id"] == artist_user.discord_user_id
 
     missing = await client.get("/commissions/by-discord-channel/1")
     assert missing.status_code == 404

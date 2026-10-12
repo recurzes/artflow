@@ -184,6 +184,15 @@ async def complete(
     comm = await commission_service.complete_commission(db, commission_id)
     return CommissionRead.model_validate(comm)
 
+@router.post("/{commission_id}/cancel", response_model=CommissionRead)
+async def cancel(
+        commission_id: uuid.UUID,
+        db: DBSession,
+        _auth: BotAuth
+) -> CommissionRead:
+    comm = await commission_service.cancel_commission(db, commission_id)
+    return CommissionRead.model_validate(comm)
+
 @router.post(
     "/{commission_id}/review",
     response_model=ReviewRead,

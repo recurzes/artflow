@@ -21,7 +21,8 @@ from bot.utils.embeds import (
     success_embed,
     warning_embed,
 )
-from bot.utils.tickets import create_commission_ticket
+from bot.utils.replies import reply_error, reply_success
+from bot.utils.tickets import TicketError, create_commission_ticket, ticket_commission
 from shared.exchange_rates import php_to_usd
 from shared.storage import upload_delivery_file, upload_receipt, upload_wip_image
 
@@ -146,58 +147,55 @@ class IntakeModal(discord.ui.Modal, title="Commission intake"):
         placeholder="Links or notes for reference materials"
     )
 
-    def __init__(self, bot: commands.Bot, commission_id: str) -> None:
+    def __init__(self, commission_id: str) -> None:
         super().__init__()
-        self.bot = bot
         self.commission_id = commission_id
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         notes = f"{self.brief.value}\n\nReferences:\n{self.refs.value or '—'}"
         try:
-            await self.bot.api.submit_intake(self.commission_id, notes)
-            await interaction.response.send_message(
-                embed=success_embed("Intake saved", "The artist can review your brief"),
-                ephemeral=True
-            )
-            if interaction.channel and isinstance(interaction.channel, discord.TextChannel):
-                await interaction.channel.send(
-                    embed=base_embed(
-                        title="Client intake",
-                        description=notes[:4000],
-                    )
-                )
+            await interaction.client.api.submit_intake(self.commission_id, notes)
         except APIError as exc:
-            await interaction.response.send_message(
-                embed=error_embed(f"Intake failed {exc.detail}"),
-                ephemeral=True
-            )
-        except Exception as exc:
-            await interaction.response.send_message(
-                embed=error_embed(f"Intake failed: {str(exc)}"),
-                ephemeral=True
+            await reply_error(interaction, exc.detail)
+            return
+
+        await reply_success(
+            interaction,
+            "Intake saved",
+            "The artist can review your brief and send a quote"
+        )
+        if isinstance(interaction.channel, discord.TextChannel):
+            await interaction.channel.send(
+                embed=base_embed(
+                    title="Client intake",
+                    description=notes[:4000],
+                )
             )
 
 
 class IntakeOpenView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, commission_id: str, client_id: int) -> None:
-        super().__init__(timeout=86400)
-        self.bot = bot
-        self.commission_id = commission_id
-        self.client_id = client_id
+    """Posted once in every new ticket. It holds no state: the commission is
+    looked up from the channel, so the button keeps working after a restart."""
 
-    @discord.ui.button(label="Submit commission brief", style=discord.ButtonStyle.primary)
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Submit commission brief",
+        style=discord.ButtonStyle.primary,
+        custom_id="artflow:intake_open"
+    )
     async def open_intake(
             self,
             interaction: discord.Interaction,
             button: discord.ui.Button
     ) -> None:
-        if interaction.user.id != self.client_id:
-            await interaction.response.send_message(
-                "Only the client can submit intake",
-                ephemeral=True
-            )
+        try:
+            comm = await ticket_commission(interaction, only="client", action="submit the brief")
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
             return
-        await interaction.response.send_modal(IntakeModal(self.bot, self.commission_id))
+        await interaction.response.send_modal(IntakeModal(comm["id"]))
 
 
 class CounterOfferModal(discord.ui.Modal, title="Counter offer"):
@@ -459,179 +457,185 @@ class TosAcceptView(discord.ui.View):
         )
 
 class ArtistPickView(discord.ui.View):
+    """A select menu of artists, paged 25 at a time (Discord's limit per menu)."""
+
     def __init__(
             self,
             *,
-            bot: commands.Bot,
             server_uuid: str,
             artists: list[dict[str, Any]],
-            client_user: discord.Member,
-            page: int = 0,
+            requester_id: int,
             is_nsfw_request: bool = False
     ) -> None:
         super().__init__(timeout=300)
-        self.bot = bot
         self.server_uuid = server_uuid
-        self._all = artists
-        self.artists = {a["id"]: a for a in artists}
-        self._page = page
-        self._client_user = client_user
+        self._artists = artists
+        self._by_id = {a["id"]: a for a in artists}
+        self._requester_id = requester_id
         self._is_nsfw_request = is_nsfw_request
+        self._page = 0
 
-        n = len(artists)
-        max_page = max(0, (n - 1) // PAGE_SIZE)
-        self._page = min(page, max_page)
+        self.select = discord.ui.Select(placeholder="Choose an artist...")
+        self.select.callback = self._on_select
+        self.add_item(self.select)
+
+        self.prev_btn = discord.ui.Button(label="Previous", style=discord.ButtonStyle.secondary)
+        self.prev_btn.callback = self._prev_page
+        self.next_btn = discord.ui.Button(label="Next", style=discord.ButtonStyle.secondary)
+        self.next_btn.callback = self._next_page
+        if self.page_count > 1:
+            self.add_item(self.prev_btn)
+            self.add_item(self.next_btn)
+
+        self._render()
+
+    @property
+    def page_count(self) -> int:
+        return max(1, -(-len(self._artists) // PAGE_SIZE))
+
+    def _render(self) -> None:
         start = self._page * PAGE_SIZE
-        page_artists = artists[start : start + PAGE_SIZE]
-
-        options = [
+        self.select.options = [
             discord.SelectOption(
                 label=a["display_name"][:100],
                 value=a["id"],
                 description=", ".join(a["styles"][:3])[:100] if a.get("styles") else None
             )
-            for a in page_artists
+            for a in self._artists[start : start + PAGE_SIZE]
         ]
+        if self.page_count > 1:
+            self.select.placeholder = (
+                f"Choose an artist... (page {self._page + 1} of {self.page_count})"
+            )
+        self.prev_btn.disabled = self._page <= 0
+        self.next_btn.disabled = self._page >= self.page_count - 1
 
-        self.select = discord.ui.Select(placeholder="Choose an artist...", options=options)
-        self.select.callback = self._on_select
-        self.add_item(self.select)
-
-        self.prev_btn = discord.ui.button(
-            label="Previous",
-            style=discord.ButtonStyle.secondary,
-            disabled=self._page <= 0
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self._requester_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person who started this request can use this menu",
+            ephemeral=True
         )
-        self.prev_btn.callback = self._prev_page
-        self.add_item(self.prev_btn)
+        return False
 
+    async def _turn_page(self, interaction: discord.Interaction, step: int) -> None:
+        self._page = min(max(self._page + step, 0), self.page_count - 1)
+        self._render()
+        await interaction.response.edit_message(view=self)
 
     async def _prev_page(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self._client_user.id:
-            await interaction.response.send_message(
-                "Only the person who started this request can paginate",
-                ephemeral=True
-            )
-            return
-        await interaction.response.edit_message(
-            view=ArtistPickView(
-                bot=self.bot,
-                server_uuid=self.server_uuid,
-                artists=self._all,
-                client_user=self._client_user,
-                page=self._page - 1,
-                is_nsfw_request=self._is_nsfw_request
-            )
-        )
-
+        await self._turn_page(interaction, -1)
 
     async def _next_page(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self._client_user.id:
-            await interaction.response.send_message(
-                "Only the person who started this request can paginate",
-                ephemeral=True
-            )
-            return
-        await interaction.response.edit_message(
-            view=ArtistPickView(
-                bot=self.bot,
-                server_uuid=self.server_uuid,
-                artists=self._all,
-                client_user=self._client_user,
-                page=self._page + 1,
-                is_nsfw_request=self._is_nsfw_request
-            )
+        await self._turn_page(interaction, +1)
+
+    async def _on_select(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        await open_commission_ticket(
+            interaction,
+            server_uuid=self.server_uuid,
+            artist=self._by_id[self.select.values[0]],
+            is_nsfw=self._is_nsfw_request
         )
 
 
-    async def _on_select(self, interaction: discord.Interaction) -> None:
-        if interaction.user.id != self._client_user.id:
-            await interaction.response.send_message(
-                "Only the person who started this request can choose.", ephemeral=True
+async def open_commission_ticket(
+        interaction: discord.Interaction,
+        *,
+        server_uuid: str,
+        artist: dict[str, Any],
+        is_nsfw: bool
+) -> None:
+    """Create the commission, then its private channel, and link the two."""
+    guild = interaction.guild
+    api = interaction.client.api
+    client_member = interaction.user
+    if guild is None:
+        await reply_error(interaction, "Use this in a server")
+        return
+
+    artist_member = guild.get_member(int(artist["discord_user_id"]))
+    if artist_member is None:
+        await reply_error(interaction, "That artist is no longer in this server")
+        return
+
+    # The commission is created first. The API decides whether it may exist at all
+    # (capacity, NSFW rules, artist availability), so a refused request never
+    # leaves an empty channel behind.
+    try:
+        client_row = await api.upsert_user(
+            client_member.id,
+            account_created_at=client_member.created_at.isoformat()
+        )
+        comm = await api.create_commission(
+            server_id=server_uuid,
+            artist_id=artist["id"],
+            client_id=client_row["id"],
+            is_nsfw=is_nsfw
+        )
+    except APIError as exc:
+        await reply_error(interaction, exc.detail)
+        return
+
+    channel: discord.TextChannel | None = None
+    try:
+        channel = await create_commission_ticket(
+            guild,
+            artist_member=artist_member,
+            client_member=client_member,
+            commission_label=f"{artist['display_name']}-{client_member.name}",
+            nsfw=is_nsfw
+        )
+        await api.open_ticket(comm["id"], channel.id)
+    except (APIError, discord.HTTPException, RuntimeError) as exc:
+        logger.exception("Could not open a ticket for commission %s", comm["id"])
+        await _undo_ticket(api, comm["id"], channel)
+        await reply_error(
+            interaction,
+            exc.detail if isinstance(exc, APIError) else (
+                "I could not create the ticket channel. "
+                "An admin should check that I can manage channels"
             )
-            return
+        )
+        return
 
-        await interaction.response.defer(ephemeral=True)
-        artist_id = self.select.values[0]
-        artist = self.artists[artist_id]
+    await channel.send(
+        embed=base_embed(
+            title="Commission ticket",
+            description=(
+                f"Client: {client_member.mention}\n"
+                f"Artist: {artist_member.mention}\n\n"
+                "**Client:** use **Submit commission brief** below, then the artist can "
+                "`/quote`.\n"
+                "After a quote: use **Accept quote** / **Counter offer** on the quote "
+                "message, then **Accept TOS** (or `/confirm-tos`), then `/pay`."
+            ),
+        ),
+        view=IntakeOpenView()
+    )
+    await reply_success(
+        interaction,
+        "Ticket created",
+        f"Your private channel: {channel.mention}"
+    )
 
+
+async def _undo_ticket(
+        api: Any,
+        commission_id: str,
+        channel: discord.TextChannel | None
+) -> None:
+    """Roll back a half-opened commission so it does not hold one of the artist's slots."""
+    try:
+        await api.cancel(commission_id)
+    except APIError:
+        logger.exception("Could not cancel half-opened commission %s", commission_id)
+    if channel is not None:
         try:
-            cap = await self.bot.api.get_artist_capacity(artist_id)
-            if cap["count"] >= cap["max"]:
-                await interaction.followup.send(
-                    embed=error_embed(
-                        "Artist at capacity",
-                        "This artist has reached their maximum active commissions"
-                    ),
-                    ephemeral=True
-                )
-                return
-
-            guild = interaction.guild
-            if guild is None:
-                return
-
-            artist_member = guild.get_member(int(artist["discord_user_id"]))
-            if artist_member is None:
-                await interaction.followup.send(
-                    embed=error_embed("Artist not in server, They must be a member"),
-                    ephemeral=True
-                )
-                return
-
-            client_row = await self.bot.api.get_user(interaction.user.id)
-            channel = await create_commission_ticket(
-                guild,
-                artist_member=artist_member,
-                client_member=interaction.user,
-                commission_label=f"{artist_id['display_name']}-{interaction.user.name}",
-                nsfw=self._is_nsfw_request
-            )
-
-            comm = await self.bot.api.create_commission(
-                server_id=self.server_uuid,
-                artist_id=artist_id,
-                client_id=client_row["id"],
-                is_nsfw=self._is_nsfw_request
-            )
-            comm_id = comm["id"]
-            await self.bot.api.open_ticket(comm_id, channel.id)
-
-            await channel.send(
-                embed=base_embed(
-                    title="Commission ticket",
-                    description=(
-                        f"Client: {interaction.user.mention}\n"
-                        f"Artist: {artist_member.mention}\n\n"
-                        "**Client:** use **Submit commission brief** below, then the artist can "
-                        "`/quote`.\n"
-                        "After a quote: use **Accept quote** / **Counter offer** on the quote "
-                        "message, then **Accept TOS** (or `/confirm-tos`), then `/pay`."
-                    ),
-                ),
-                view=IntakeOpenView(self.bot, str(comm_id), interaction.user.id)
-            )
-            await interaction.followup.send(
-                embed=success_embed(
-                    title="Ticket created",
-                    description=f"Your private channel: {channel.mention}"
-                ),
-                ephemeral=True
-            )
-
-        except APIError as exc:
-            logger.exception("API error creating commission")
-            await interaction.followup.send(
-                embed=error_embed(f"API error: {exc.detail}"),
-                ephemeral=True
-            )
-
-        except Exception as exc:
-            logger.exception("Commission ticket failed")
-            await interaction.followup.send(
-                embed=error_embed(f"Error: {str(exc)}"),
-                ephemeral=True
-            )
+            await channel.delete(reason="ArtFlow: ticket could not be opened")
+        except discord.HTTPException:
+            logger.exception("Could not delete orphan ticket channel %s", channel.id)
 
 
 class CommissionCog(commands.Cog, name="Commissions"):
@@ -648,11 +652,11 @@ class CommissionCog(commands.Cog, name="Commissions"):
             "(requires 18+ verification to open NSFW tickets)"
         ),
         nsfw="Open an NSFW ticket (client must be 18+ verified; artist must allow NSFW)",
-        style="Filter by style (substring match)"
+        style="Only show artists tagged with this style, e.g. anime"
     )
     async def commission_request(
             self,
-            interaction: discord.InteractionMessage,
+            interaction: discord.Interaction,
             nsfw_only: bool = False,
             nsfw: bool = False,
             style: str | None = None
@@ -660,52 +664,46 @@ class CommissionCog(commands.Cog, name="Commissions"):
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         if guild is None:
-            await interaction.followup.send(
-                embed=error_embed("Use this in a server."),
-                ephemeral=True
-            )
+            await reply_error(interaction, "Use this in a server")
             return
 
+        style_filter = style.strip().lower() if style and style.strip() else None
         try:
             server = await self.bot.api.get_server(guild.id)
-            server_uuid = server["id"]
-            artists_raw = await self.bot.api.list_artists(
-                server_uuid,
-                style=style.strip().lower() if style and style.strip() else None,
+            artists = await self.bot.api.list_artists(
+                server["id"],
+                style=style_filter,
                 nsfw_only=nsfw_only
             )
-            if not artists_raw:
-                await interaction.followup.send(
-                    embed=error_embed("No artists, No active artists match these filters"),
-                    ephemeral=True
-                )
-                return
-
-            view = ArtistPickView(
-                bot=self.bot,
-                server_uuid=server_uuid,
-                artists=artists_raw,
-                client_user=interaction.user,
-                is_nsfw_request=nsfw
-            )
-            desc = "Select an artist below. Use Previous/Next if there are many"
-            if nsfw_only or (style and style.strip()):
-                desc += " Filters are applied"
-            if nsfw:
-                desc += " This will create an **NSFW** ticket (18+ only)"
-            await interaction.followup.send(
-                embed=base_embed(
-                    title="Open a commission",
-                    description=desc
-                ),
-                view=view,
-                ephemeral=True
-            )
-
         except APIError as exc:
-            await interaction.followup.send(
-                embed=error_embed(f"API error: {exc.detail}")
-            )
+            await reply_error(interaction, exc.detail)
+            return
+
+        if not artists:
+            await reply_error(interaction, "No active artists match these filters")
+            return
+
+        view = ArtistPickView(
+            server_uuid=server["id"],
+            artists=artists,
+            requester_id=interaction.user.id,
+            is_nsfw_request=nsfw
+        )
+        desc = "Select an artist below."
+        if view.page_count > 1:
+            desc += " Use Previous / Next to see more."
+        if nsfw_only or style_filter:
+            desc += " Filters are applied."
+        if nsfw:
+            desc += " This will create an **NSFW** ticket (18+ only)."
+        await interaction.followup.send(
+            embed=base_embed(
+                title="Open a commission",
+                description=desc
+            ),
+            view=view,
+            ephemeral=True
+        )
 
     @app_commands.command(
         name="quote",
@@ -1073,3 +1071,5 @@ class CommissionCog(commands.Cog, name="Commissions"):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(CommissionCog(bot))
+    # Persistent views: their buttons keep working after a restart.
+    bot.add_view(IntakeOpenView())

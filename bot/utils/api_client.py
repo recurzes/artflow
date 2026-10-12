@@ -306,6 +306,9 @@ class APIClient:
     async def complete(self, commission_id: str) -> Json:
         return await self._request("POST", f"/commissions/{commission_id}/complete")
 
+    async def cancel(self, commission_id: str) -> Json:
+        return await self._request("POST", f"/commissions/{commission_id}/cancel")
+
     async def review(
             self,
             commission_id: str,
