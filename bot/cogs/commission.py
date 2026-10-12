@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 from datetime import datetime, timezone
@@ -23,6 +22,7 @@ from bot.utils.embeds import (
 )
 from bot.utils.replies import reply_error, reply_success
 from bot.utils.tickets import TicketError, create_commission_ticket, ticket_commission
+from bot.utils.uploads import MAX_RECEIPT_BYTES, RECEIPT_TYPES, check_attachment, is_image
 from shared.exchange_rates import php_to_usd
 from shared.storage import upload_delivery_file, upload_receipt, upload_wip_image
 
@@ -30,46 +30,179 @@ logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 25
 
-def _tos_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def _status_label(comm: dict[str, Any]) -> str:
+    return str(comm.get("status", "")).replace("_", " ").lower()
+
 
 def _parse_iso_dt(value: str | None) -> datetime | None:
     if not value:
         return None
     if value.endswith("Z"):
         value = value[:-1] + "+00:00"
-    return datetime.fromisoformat(value)
+    dt = datetime.fromisoformat(value)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
-def _format_payment_deadline(comm: dict[str, Any]) -> str | None:
-    raw = comm.get("payment_deadline_at")
-    if not raw:
-        return None
-    dt = _parse_iso_dt(raw) if isinstance(raw, str) else raw
+
+def _discord_time(value: str | None) -> str | None:
+    """A timestamp Discord renders in each reader's own timezone, with a countdown."""
+    dt = _parse_iso_dt(value)
     if dt is None:
         return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.strftime("%Y-%m-%d %H:%M UTC")
+    unix = int(dt.timestamp())
+    return f"<t:{unix}:f> (<t:{unix}:R>)"
+
 
 def _float_or_none(v: Any) -> float | None:
     if v is None:
         return None
     return float(v)
 
-async def _post_payment_instructions_embed(
-        bot: commands.Bot,
-        channel: discord.TextChannel,
-        comm: dict[str, Any],
-        artist: dict[str, Any]
-) -> None:
-    embed = payment_instructions_embed(
-        artist_display_name=artist.get("display_name", "Artist"),
-        quoted_price_php=_float_or_none(comm.get("quoted_price_php")),
-        payment_deadline_display=_format_payment_deadline(comm),
-        gcash_number=artist.get("gcash_number"),
-        paypal_email=artist.get("paypal_email"),
+
+def _chunks(text: str, size: int = 3900) -> list[str]:
+    return [text[i : i + size] for i in range(0, len(text), size)] or [""]
+
+
+# Quote -> terms -> payment
+
+async def post_tos(channel: discord.TextChannel, artist: dict[str, Any]) -> None:
+    """Show the artist's terms in full, with the Accept button under the last part.
+
+    The button remembers which version of the terms it was posted with.
+    """
+    parts = _chunks(artist["tos_text"])
+    for index, part in enumerate(parts):
+        is_last = index == len(parts) - 1
+        title = "Artist terms of service"
+        if len(parts) > 1:
+            title += f" ({index + 1}/{len(parts)})"
+        if not is_last:
+            await channel.send(embed=base_embed(title=title, description=part))
+            continue
+        await channel.send(
+            embed=base_embed(
+                title=title,
+                description=part + "\n\nClient: press **Accept TOS** to continue"
+            ),
+            view=tos_accept_view(artist["tos_hash"])
+        )
+
+
+async def accept_quote_flow(interaction: discord.Interaction) -> None:
+    """The client accepts the quote; the artist's terms are shown next.
+
+    Shared by the **Accept quote** button and `/accept-quote`.
+    """
+    api = interaction.client.api
+    try:
+        comm = await ticket_commission(interaction, only="client", action="accept the quote")
+        await api.accept_quote(comm["id"])
+        artist = await api.get_artist(comm["artist_id"])
+    except TicketError as exc:
+        await reply_error(interaction, str(exc))
+        return
+    except APIError as exc:
+        await reply_error(interaction, exc.detail)
+        return
+
+    if not artist.get("tos_text"):
+        await interaction.channel.send(
+            content=f"<@{comm['artist_discord_user_id']}>",
+            embed=warning_embed(
+                "Quote accepted — terms needed",
+                "The artist has not set their terms of service yet.\n"
+                "**Artist:** run `/settings tos`.\n"
+                "**Client:** then run `/confirm-tos` to read and accept them."
+            )
+        )
+        await reply_success(interaction, "Quote accepted", "Waiting for the artist's terms")
+        return
+
+    await post_tos(interaction.channel, artist)
+    await reply_success(
+        interaction,
+        "Quote accepted",
+        "Read the artist's terms below and accept them to continue"
     )
-    await channel.send(embed=embed)
+
+
+TOS_ACCEPT_BUTTON_ID = "artflow:tos_accept"
+
+
+class TosAcceptButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=rf"{TOS_ACCEPT_BUTTON_ID}:(?P<version>[0-9a-f]{{16}})"
+):
+    """Accepts the version of the terms shown above the button.
+
+    `version` is the start of that text's hash. If the artist edits their terms
+    afterwards, the click is refused and the new text is posted instead.
+    """
+
+    def __init__(self, version: str) -> None:
+        super().__init__(
+            discord.ui.Button(
+                label="Accept TOS",
+                style=discord.ButtonStyle.primary,
+                custom_id=f"{TOS_ACCEPT_BUTTON_ID}:{version}"
+            )
+        )
+        self.version = version
+
+    @classmethod
+    async def from_custom_id(
+            cls,
+            interaction: discord.Interaction,
+            item: discord.ui.Button,
+            match: re.Match[str],
+            /
+    ) -> TosAcceptButton:
+        return cls(match["version"])
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        api = interaction.client.api
+        try:
+            comm = await ticket_commission(interaction, only="client", action="accept the terms")
+            artist = await api.get_artist(comm["artist_id"])
+            current = artist.get("tos_hash") or ""
+            if not current.startswith(self.version):
+                if artist.get("tos_text"):
+                    await post_tos(interaction.channel, artist)
+                await reply_error(
+                    interaction,
+                    "The artist changed their terms after this message was posted. "
+                    "Read the current version and accept that one"
+                )
+                return
+            comm = await api.accept_tos(comm["id"], current)
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
+            return
+        except APIError as exc:
+            await reply_error(interaction, exc.detail)
+            return
+
+        await interaction.channel.send(
+            embed=payment_instructions_embed(
+                artist_display_name=artist.get("display_name", "the artist"),
+                quoted_price_php=_float_or_none(comm.get("quoted_price_php")),
+                payment_deadline_display=_discord_time(comm.get("payment_deadline_at")),
+                gcash_number=artist.get("gcash_number"),
+                paypal_email=artist.get("paypal_email"),
+            )
+        )
+        await reply_success(
+            interaction,
+            "Terms accepted",
+            "Pay the artist using the details in the channel, then upload your receipt with `/pay`"
+        )
+
+
+def tos_accept_view(tos_hash: str) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(TosAcceptButton(tos_hash[:16]))
+    return view
+
 
 async def _maybe_post_completed_works(
         guild: discord.Guild,
@@ -106,30 +239,6 @@ async def _maybe_post_public_review(
     if not isinstance(ch, discord.TextChannel):
         return
     await ch.send(embed=public_review_embed(artist_name=artist_name, rating=rating, body=body))
-
-async def _tos_accept_core(
-        bot: commands.Bot,
-        channel: discord.TextChannel,
-        user: discord.abc.User
-) -> tuple[bool, str]:
-    try:
-        comm = await bot.api.get_commission_for_channel(channel.id)
-        client = await bot.api.get_user(user.id)
-        if client["id"] != comm["client_id"]:
-            return False, "Only the client can confirm TOS"
-        artist = await bot.api.get_artist(comm['artist_id'])
-        if not artist.get("tos_text"):
-            return False, "Artist has not set TOS text yet"
-        h = _tos_hash(artist["tos_text"])
-        comm = await bot.api.accept_tos(comm['id'], h)
-        await _post_payment_instructions_embed(bot, channel, comm, artist)
-        return True, ""
-    except APIError as exc:
-        return False, exc.detail
-    except Exception as exc:
-        logger.exception(f"TOS accept failed, Reason: {exc}")
-        return False, str(exc)
-
 
 class IntakeModal(discord.ui.Modal, title="Commission intake"):
     brief = discord.ui.TextInput(
@@ -206,33 +315,32 @@ class CounterOfferModal(discord.ui.Modal, title="Counter offer"):
         required=True
     )
 
-    def __init__(self, bot: commands.Bot, channel_id: int) -> None:
+    def __init__(self, commission: dict[str, Any]) -> None:
         super().__init__()
-        self.bot = bot
-        self.channel_id = channel_id
+        self.commission = commission
 
     async def on_submit(self, interaction: Interaction, /) -> None:
         try:
-            comm = await self.bot.api.get_commission_for_channel(self.channel_id)
-            await self.bot.api.counter_offer(comm['id'], self.notes.value)
-            await interaction.response.send_message(
-                embed=success_embed(
-                    "Counter sent",
-                    "The artist will send a new `/quote` when ready"
-                ),
-                ephemeral=True
-            )
-            if interaction.channel and isinstance(interaction.channel, discord.TextChannel):
-                await interaction.channel.send(
-                    embed=base_embed(
-                        title="Counter offer",
-                        description=self.notes.value
+            await interaction.client.api.counter_offer(self.commission["id"], self.notes.value)
+        except APIError as exc:
+            await reply_error(interaction, exc.detail)
+            return
+
+        await reply_success(
+            interaction,
+            "Counter sent",
+            "The artist will send a new `/quote` when ready"
+        )
+        if isinstance(interaction.channel, discord.TextChannel):
+            await interaction.channel.send(
+                content=f"<@{self.commission['artist_discord_user_id']}>",
+                embed=base_embed(
+                    title="Counter offer",
+                    description=(
+                        f"{self.notes.value}\n\n"
+                        "Artist: send a new quote with `/quote` when you are ready"
                     )
                 )
-        except APIError as exc:
-            await interaction.response.send_message(
-                embed=error_embed("Counter failed", exc.detail),
-                ephemeral=True
             )
 
 
@@ -352,109 +460,48 @@ class ReviewPromptView(discord.ui.View):
 
 
 class QuoteActionsView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, channel_id: int) -> None:
-        super().__init__(timeout=None)
-        self.bot = bot
-        self.channel_id = channel_id
+    """The buttons under a quote. Stateless and registered at startup: the
+    commission is looked up from the channel the button is in."""
 
-    @discord.ui.button(label="Accept quote", style=discord.ButtonStyle.success)
-    async def accept_quote_bt(
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Accept quote",
+        style=discord.ButtonStyle.success,
+        custom_id="artflow:quote_accept"
+    )
+    async def accept_quote_btn(
             self,
             interaction: discord.Interaction,
             button: discord.ui.Button
     ) -> None:
         await interaction.response.defer(ephemeral=True)
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
-            return
-        try:
-            comm = await self.bot.api.get_commission_for_channel(interaction.channel_id)
-            client = await self.bot.api.get_user(interaction.user.id)
-            if client["id"] != comm["client_id"]:
-                await interaction.followup.send(
-                    embed=error_embed("Only the client can accept the quote"),
-                    ephemeral=True
-                )
-                return
-            await self.bot.api.accept_quote(comm['id'])
-            artist = await self.bot.api.get_artist(comm['artist_id'])
-            tos = artist.get("tos_text") or ""
-            if not tos:
-                await interaction.followup.send(
-                    embed=warning_embed(
-                        "Quote accepted",
-                        "The artist must set TOS with `/settings tos` before you can pay"
-                    ),
-                    ephemeral=True
+        await accept_quote_flow(interaction)
 
-                )
-                return
-            excerpt = tos[:3900] = ("..." if len(tos) > 3900 else "")
-            await interaction.channel.send(
-                embed=base_embed(
-                    title="Artist terms of service",
-                    description=excerpt + "\n\nUse **Accept TOS** below or `/confirm-tos`"
-                ),
-                view=TosAcceptView(self.bot, interaction.channel_id)
-            )
-            await interaction.followup.send(
-                embed=success_embed("Moved to TOS step. Read and accept when ready"),
-                ephemeral=True
-            )
-        except APIError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
-
-    @discord.ui.button(label="Counter offer", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(
+        label="Counter offer",
+        style=discord.ButtonStyle.secondary,
+        custom_id="artflow:quote_counter"
+    )
     async def counter_btn(
             self,
             interaction: discord.Interaction,
             button: discord.ui.Button
     ) -> None:
         try:
-            comm = await self.bot.api.get_commission_for_channel(self.channel_id)
-            client = await self.bot.api.get_user(interaction.user.id)
-            if client["id"] != comm["client_id"]:
-                await interaction.response.send_message(
-                    "Only the client can counter",
-                    ephemeral=True
-                )
-                return
-            await interaction.response.send_modal(
-                CounterOfferModal(self.bot, self.channel_id)
-            )
-        except APIError:
-            await interaction.response.send_message(
-                "Could not load commission",
-                ephemeral=True
-            )
-
-
-class TosAcceptView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, channel_id: int) -> None:
-        super().__init__(timeout=None)
-        self.bot = bot
-        self.channel_id = channel_id
-
-    @discord.ui.button(label="Accept TOS", style=discord.ButtonStyle.primary)
-    async def tos_btn(
-            self,
-            interaction: discord.Interaction,
-            button: discord.ui.Button
-    ) -> None:
-        await interaction.response.defer(ephemeral=True)
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
+            comm = await ticket_commission(interaction, only="client", action="counter the quote")
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
             return
-        ok, err = await _tos_accept_core(self.bot, interaction.channel, interaction.user)
-        if not ok:
-            await interaction.followup.send(embed=error_embed(err), ephemeral=True)
+        if comm["status"] != "QUOTED":
+            await reply_error(
+                interaction,
+                f"There is no open quote to counter (the commission is {_status_label(comm)})"
+            )
             return
-        await interaction.followup.send(
-            embed=success_embed(
-                "TOS accepted — upload your receipt with `/pay`"
-            ),
-            ephemeral=True
-        )
+        await interaction.response.send_modal(CounterOfferModal(comm))
+
 
 class ArtistPickView(discord.ui.View):
     """A select menu of artists, paged 25 at a time (Discord's limit per menu)."""
@@ -713,37 +760,23 @@ class CommissionCog(commands.Cog, name="Commissions"):
     async def quote(
             self,
             interaction: discord.Interaction,
-            amount: float,
+            amount: app_commands.Range[float, 1, 10_000_000],
             notes: str = ""
     ) -> None:
         await interaction.response.defer(ephemeral=True)
-        if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
-            return
-
         try:
-            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
-            artist_full = await self.bot.api.get_artist(comm['artist_id'])
-        except APIError:
-            await interaction.followup.send(embed=error_embed("No commission for this channel"))
-            return
-
-        if str(interaction.user.id) != artist_full["discord_user_id"]:
-            await interaction.followup.send(
-                embed=error_embed("Only the assigned artist can post a quote"),
-                ephemeral=True
-            )
-            return
-
-        usd = await php_to_usd(Decimal(str(amount)))
-        try:
+            comm = await ticket_commission(interaction, only="artist", action="send a quote")
+            usd = await php_to_usd(Decimal(str(amount)))
             await self.bot.api.quote(
                 comm["id"],
-                price_php=str(amount),
+                price_php=f"{amount:.2f}",
                 price_usd=str(usd) if usd is not None else None
             )
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
+            return
         except APIError as exc:
-            await interaction.followup.send(embed=error_embed(f"Quote failed: {exc.detail}"))
+            await reply_error(interaction, exc.detail)
             return
 
         desc = f"**₱{amount:,.2f} PHP**"
@@ -752,13 +785,14 @@ class CommissionCog(commands.Cog, name="Commissions"):
         if notes:
             desc += f"\n\n{notes}"
         await interaction.channel.send(
+            content=f"<@{comm['client_discord_user_id']}>",
             embed=base_embed(
                 title="Quote",
                 description=desc + "\n\nClient: **Accept quote** or **Counter offer** below"
             ),
-            view=QuoteActionsView(self.bot, interaction.channel.id)
+            view=QuoteActionsView()
         )
-        await interaction.followup.send(embed=success_embed("Quote sent"), ephemeral=True)
+        await reply_success(interaction, "Quote sent")
 
     @app_commands.command(
         name="accept-quote",
@@ -766,63 +800,42 @@ class CommissionCog(commands.Cog, name="Commissions"):
     )
     async def accept_quote(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
-        if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
-            return
-        try:
-            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
-            client = await self.bot.api.get_user(interaction.user.id)
-            if client["id"] != comm["client_id"]:
-                await interaction.followup.send(
-                    embed=error_embed("Only the client can accept the quote"),
-                    ephemeral=True
-                )
-                return
-            await self.bot.api.accept_quote(comm['id'])
-            artist = await self.bot.api.get_artist(comm['artist_id'])
-            tos = artist.get("tos_text") or ""
-            if not tos:
-                await interaction.followup.send(
-                    embed=warning_embed(
-                        "Quote accepted",
-                        "The artist must set TOS with `/settings tos` before you can pay"
-                    ),
-                    ephemeral=True
-                )
-                return
-            excerpt = tos[:3900] + ("..." if len(tos) > 3900 else "")
-            await interaction.channel.send(
-                embed=base_embed(
-                    title="Artist terms of service",
-                    description=excerpt + "\n\nUse **Accept TOS** below or `/confirm-tos`"
-                ),
-                view=TosAcceptView(self.bot, interaction.channel.id)
-            )
-            await interaction.followup.send(
-                embed=success_embed("Moved to TOS step"),
-                ephemeral=True
-            )
-        except APIError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
+        await accept_quote_flow(interaction)
 
     @app_commands.command(
         name="confirm-tos",
-        description="[Client] Accept the artist TOS and proceed to payment"
+        description="[Client] Show the artist's terms so you can accept them"
     )
     async def confirm_tos(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
-        if not interaction.guild or not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
+        try:
+            comm = await ticket_commission(interaction, only="client", action="accept the terms")
+            artist = await self.bot.api.get_artist(comm["artist_id"])
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
             return
-        ok, err = await _tos_accept_core(self.bot, interaction.channel, interaction.user)
-        if not ok:
-            await interaction.followup.send(embed=error_embed(err), ephemeral=True)
+        except APIError as exc:
+            await reply_error(interaction, exc.detail)
             return
-        await interaction.followup.send(
-            embed=success_embed(
-                "TOS accepted — upload your receipt with `/pay`"
-            ),
-            ephemeral=True
+
+        if comm["status"] != "TOS_PENDING":
+            await reply_error(
+                interaction,
+                f"There are no terms to accept right now (the commission is {_status_label(comm)})"
+            )
+            return
+        if not artist.get("tos_text"):
+            await reply_error(
+                interaction,
+                "The artist has not set their terms yet. Ask them to run `/settings tos`"
+            )
+            return
+
+        await post_tos(interaction.channel, artist)
+        await reply_success(
+            interaction,
+            "Terms posted",
+            "Read them in the channel and press **Accept TOS**"
         )
 
     @app_commands.command(
@@ -836,30 +849,54 @@ class CommissionCog(commands.Cog, name="Commissions"):
             receipt: discord.Attachment
     ) -> None:
         await interaction.response.defer(ephemeral=True)
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
-            return
         try:
-            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
-            client = await self.bot.api.get_user(interaction.user.id)
-            if client["id"] != comm["client_id"]:
-                await interaction.followup.send(embed=error_embed("Only the client can pay"))
-                return
-            data = await receipt.read()
-            url = await upload_receipt(data, receipt.filename, str(comm["id"]))
-            await self.bot.api.upload_receipt(comm['id'], url)
-            await interaction.channel.send(
-                embed=success_embed(
-                    "Receipt uploaded",
-                    "Artist: confirm payment with `/confirm-payment` when funds clear"
-                )
+            comm = await ticket_commission(interaction, only="client", action="upload the receipt")
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
+            return
+
+        # Checked here as well as by the API, so nothing is stored for a request
+        # that is going to be refused.
+        if comm["status"] != "PAYMENT_PENDING":
+            await reply_error(
+                interaction,
+                "A receipt can be uploaded once the terms are accepted "
+                f"(the commission is {_status_label(comm)})"
             )
-            await interaction.followup.send(
-                embed=success_embed("Receipt submitted"),
-                ephemeral=True
-            )
+            return
+        problem = check_attachment(
+            receipt,
+            allowed_types=RECEIPT_TYPES,
+            max_bytes=MAX_RECEIPT_BYTES
+        )
+        if problem:
+            await reply_error(interaction, problem)
+            return
+
+        try:
+            url = await upload_receipt(await receipt.read(), receipt.filename, str(comm["id"]))
+            await self.bot.api.upload_receipt(comm["id"], url)
         except APIError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
+            await reply_error(interaction, exc.detail)
+            return
+        except Exception:
+            logger.exception("Could not store the receipt for commission %s", comm["id"])
+            await reply_error(interaction, "The receipt could not be stored. Please try again")
+            return
+
+        embed = success_embed(
+            "Receipt uploaded",
+            "Artist: check the receipt and run `/confirm-payment` once the funds arrive"
+        )
+        if is_image(receipt):
+            embed.set_image(url=url)
+        else:
+            embed.add_field(name="Receipt", value=f"[Open file]({url})", inline=False)
+        await interaction.channel.send(
+            content=f"<@{comm['artist_discord_user_id']}>",
+            embed=embed
+        )
+        await reply_success(interaction, "Receipt submitted")
 
     @app_commands.command(
         name="confirm-payment",
@@ -867,28 +904,24 @@ class CommissionCog(commands.Cog, name="Commissions"):
     )
     async def confirm_payment_cmd(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.followup.send(embed=error_embed("Use in a ticket channel"))
-            return
         try:
-            comm = await self.bot.api.get_commission_for_channel(interaction.channel.id)
-            artist = await self.bot.api.get_artist(comm['artist_id'])
-            if str(interaction.user.id) != artist["discord_user_id"]:
-                await interaction.followup.send(
-                    embed=error_embed("Only the artist can confirm payment"),
-                    ephemeral=True
-                )
-                return
-            await self.bot.api.confirm_payment(comm['id'])
-            await interaction.channel.send(
-                embed=success_embed("Payment confirmed — work may begin")
-            )
-            await interaction.followup.send(
-                embed=success_embed("Confirmed"),
-                ephemeral=True
-            )
+            comm = await ticket_commission(interaction, only="artist", action="confirm payment")
+            await self.bot.api.confirm_payment(comm["id"])
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
+            return
         except APIError as exc:
-            await interaction.followup.send(embed=error_embed(f"Failed: {exc.detail}"))
+            await reply_error(interaction, exc.detail)
+            return
+
+        await interaction.channel.send(
+            content=f"<@{comm['client_discord_user_id']}>",
+            embed=success_embed(
+                "Payment confirmed — work may begin",
+                "Artist: post progress with `/wip`, then `/deliver` the final file"
+            )
+        )
+        await reply_success(interaction, "Confirmed")
 
     @app_commands.command(
         name="wip",
@@ -1073,3 +1106,5 @@ async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(CommissionCog(bot))
     # Persistent views: their buttons keep working after a restart.
     bot.add_view(IntakeOpenView())
+    bot.add_view(QuoteActionsView())
+    bot.add_dynamic_items(TosAcceptButton)
