@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from api.dependencies import BotAuth, DBSession, RedisClient, limiter
-from api.services import user_service
-from shared.schemas.user import (
+from api.users import service as user_service
+from api.users.schemas import (
     UserCreate,
     UserRead,
     Verify18ApproveBody,

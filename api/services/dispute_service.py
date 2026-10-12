@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.services import commission_service, user_service
+from api.services import commission_service
+from api.users import service as user_service
 from shared.errors import Conflict, Forbidden, InvalidState, NotFound
 from shared.models.artist import Artist
 from shared.models.commission import CommissionStatus
