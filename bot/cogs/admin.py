@@ -39,7 +39,8 @@ class AdminGroup(app_commands.Group, name="admin", description="Admin management
                 description=(
                     f"**Active commissions:** {st.get('active_commissions', 0)}\n"
                     f"**Completed today:** {st.get('completed_today', 0)}\n"
-                    f"**Platform fees (PHP) this month:** {st.get('revenue_php_this_month', 0):,.2f}"
+                    "**Platform fees (PHP) this month:** "
+                    f"{st.get('revenue_php_this_month', 0):,.2f}"
                 )
             ),
             ephemeral=True

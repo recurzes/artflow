@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from shared.schemas.common import TimestampSchema
 
+
 class ReviewCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

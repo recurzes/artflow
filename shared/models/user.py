@@ -1,10 +1,17 @@
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.models.base import Base, TimestampMixin, uuid_pk
+
+if TYPE_CHECKING:
+    from shared.models.artist import Artist
+    from shared.models.commission import Commission
+    from shared.models.dispute import Dispute
+    from shared.models.review import Review
 
 
 class User(Base, TimestampMixin):
@@ -51,8 +58,14 @@ class User(Base, TimestampMixin):
     )
 
     # Relationships
-    artist_profiles: Mapped[list["Artist"]] = relationship(back_populates="user", foreign_keys="Artist.user_id")
-    commissions_as_client: Mapped[list["Commission"]] = relationship(back_populates="client", foreign_keys="Commission.client_id")
+    artist_profiles: Mapped[list["Artist"]] = relationship(
+        back_populates="user",
+        foreign_keys="Artist.user_id"
+    )
+    commissions_as_client: Mapped[list["Commission"]] = relationship(
+        back_populates="client",
+        foreign_keys="Commission.client_id"
+    )
     reviews_given: Mapped[list["Review"]] = relationship(back_populates="reviewer")
     disputes_raised: Mapped[list["Dispute"]] = relationship(
         back_populates="raised_by_user",

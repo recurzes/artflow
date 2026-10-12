@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import EmailStr, BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from shared.schemas.common import TimestampSchema
 

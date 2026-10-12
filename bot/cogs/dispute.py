@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from os import name
 from typing import Any
 
 import aiohttp

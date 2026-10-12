@@ -7,7 +7,7 @@ from shared.schemas.user import (
     UserRead,
     Verify18ApproveBody,
     Verify18Response,
-    Verify18Submit
+    Verify18Submit,
 )
 
 router = APIRouter(prefix="/users", tags=["users"])

@@ -50,12 +50,12 @@ async def open_dispute(
     )
     comm = rcomm.unique().scalar_one_or_none()
     if comm is None:
-        raise ValueError("Cannot open a dispute on a cancelled commission")
+        raise ValueError("Commission not found")
 
     is_client = comm.client_id == raiser.id
     is_artist = comm.artist is not None and comm.artist.user_id == raiser.id
-    if not is_artist and not is_artist:
-        raise ValueError("Cannot open a dispute on a completed commission")
+    if not is_client and not is_artist:
+        raise ValueError("Only the client or the artist can open a dispute")
 
     existing = await get_dispute_by_commission_id(db, body.commission_id)
     if existing is not None:

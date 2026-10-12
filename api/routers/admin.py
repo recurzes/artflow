@@ -1,13 +1,13 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 
 from api.dependencies import BotAuth, DBSession
 from shared.models.artist import Artist
-from shared.models.user import User
 from shared.models.commission import Commission, CommissionStatus
+from shared.models.user import User
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 

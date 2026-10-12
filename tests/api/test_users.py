@@ -3,8 +3,6 @@ Unit + integration tests for the /users router.
 """
 import uuid
 
-import pytest
-
 from tests.conftest import make_discord_id
 
 BOT_SECRET_HEADER = {"X-Bot-Secret": "test-secret"}

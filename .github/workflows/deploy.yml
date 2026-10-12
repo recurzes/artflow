@@ -1,13 +1,55 @@
-name: Deploy to Dokploy
+name: Test and deploy
 
 on:
   push:
     branches: [main]
+  pull_request:
 
 jobs:
+  test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: artflow
+          POSTGRES_PASSWORD: artflow
+          POSTGRES_DB: artflow
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U artflow -d artflow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.17"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Lint
+        run: uv run --frozen --extra dev ruff check .
+
+      - name: Test
+        run: uv run --frozen --extra dev pytest
+
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout
