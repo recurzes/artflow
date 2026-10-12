@@ -1,14 +1,14 @@
 from fastapi import APIRouter, status
 
 from api.dependencies import BotAuth, DBSession
-from api.services import server_service
-from shared.models.server import Server
-from shared.schemas.server import (
+from api.servers import service as server_service
+from api.servers.schemas import (
     ServerCreate,
     ServerPatch,
     ServerRead,
     ServerSettings,
 )
+from shared.models.server import Server
 
 router = APIRouter(prefix="/servers", tags=["servers"])
 
