@@ -5,7 +5,6 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
 from api.dependencies import BotAuth, DBSession
-from models import Artist
 from shared.models.artist import Artist
 from shared.models.user import User
 from shared.models.commission import Commission, CommissionStatus

@@ -6,7 +6,6 @@ import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
-from urllib3.contrib.emscripten import response
 
 from bot.utils.embeds import base_embed, error_embed, success_embed
 from shared.discord_layout import ROLE_18_VERIFIED
