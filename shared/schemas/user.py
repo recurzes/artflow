@@ -8,7 +8,6 @@ from shared.schemas.common import TimestampSchema
 
 class UserCreate(BaseModel):
     discord_user_id: str = Field(min_length=1, max_length=20)
-    is_phone_verified: bool = False
     discord_account_created_at: datetime | None = None
 
 class UserRead(TimestampSchema):
@@ -26,12 +25,11 @@ class Verify18Submit(BaseModel):
     model_config = {"from_attributes": False}
 
     discord_user_id: str = Field(min_length=1, max_length=20)
-    is_phone_verified: bool = False
     discord_account_created_at: datetime | None = None
 
 
 class Verify18Response(BaseModel):
-    status: Literal["approved", "pending_mode", "already_verified"]
+    status: Literal["approved", "pending_mod", "already_verified"]
     detail: str | None = None
 
 

@@ -1,64 +1,69 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.errors import NotFound
 from shared.models.server import Server
-from shared.schemas.server import ServerCreate, ServerPatch, ServerSettings, ServerSettingsPatch
+from shared.schemas.server import ServerCreate, ServerPatch, ServerSettings
 
 
 async def get_server_by_discord_guild_id(
         db: AsyncSession,
         discord_guild_id: str
-) -> Server | None:
-    result = await db.execute(
+) -> Server:
+    server = await db.scalar(
         select(Server).where(Server.discord_guild_id == discord_guild_id)
     )
-    return result.scalar_one_or_none()
+    if server is None:
+        raise NotFound("Server not found")
+    return server
+
+
+def _merge_settings(current: dict | None, changes: dict) -> dict:
+    merged = ServerSettings.model_validate(current or {}).model_dump()
+    merged.update(changes)
+    return ServerSettings.model_validate(merged).model_dump()
+
 
 async def upsert_server(db: AsyncSession, data: ServerCreate) -> Server:
-    existing = await get_server_by_discord_guild_id(db, data.discord_guild_id)
-    settings_dict = data.settings.model_dump()
-    if existing:
+    existing = await db.scalar(
+        select(Server).where(Server.discord_guild_id == data.discord_guild_id)
+    )
+    if existing is not None:
         existing.name = data.name
-        existing.settings = settings_dict
+        # Only the settings the caller actually sent; re-registering a server
+        # must not reset its channel and role IDs to the defaults.
+        existing.settings = _merge_settings(
+            existing.settings,
+            data.settings.model_dump(exclude_unset=True)
+        )
         await db.flush()
         return existing
 
     server = Server(
         discord_guild_id=data.discord_guild_id,
         name=data.name,
-        settings=settings_dict
+        settings=data.settings.model_dump()
     )
     db.add(server)
     await db.flush()
     return server
 
+
 async def patch_server(
         db: AsyncSession,
         discord_guild_id: str,
         patch: ServerPatch
-) -> Server | None:
+) -> Server:
     server = await get_server_by_discord_guild_id(db, discord_guild_id)
-    if server is None:
-        return None
 
     if patch.name is not None:
         server.name = patch.name
 
     if patch.settings is not None:
-        partial: dict = patch.settings.model_dump(exclude_none=True)
-        current = ServerSettings.model_validate(server.settings or {})
-        merged = current.model_dump()
-        for key, value in partial.items():
-            merged[key] = value
-        server.settings = ServerSettings.model_validate(merged).model_dump()
+        server.settings = _merge_settings(
+            server.settings,
+            patch.settings.model_dump(exclude_none=True)
+        )
 
     await db.flush()
     return server
-
-async def merge_server_settings(
-        db: AsyncSession,
-        discord_guild_id: str,
-        patch: ServerSettingsPatch
-) -> Server | None:
-    spatch = ServerPatch(settings=patch)
-    return await patch_server(db, discord_guild_id, spatch)

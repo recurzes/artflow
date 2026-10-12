@@ -16,8 +16,9 @@ class ServerSettings(BaseModel):
     nsfw_enabled: bool = False
     max_active_commissions_per_artist: int = 5
     commission_expiry_hours: int = 24
-    # Discord channel IDs (populated by /setup wizard)
+    # Discord channel IDs (filled in when the bot provisions the server)
     channel_verification: str | None = None
+    channel_bot_commands: str | None = None
     channel_artist_directory: str | None = None
     channel_verification_queue: str | None = None
     channel_commissions_open: str | None = None

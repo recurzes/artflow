@@ -48,7 +48,6 @@ class AgeGateModal(discord.ui.Modal, title="18+ verification"):
         created = member.created_at
         body = {
             "discord_user_id": str(member.id),
-            "is_phone_verified": False,
             "discord_account_created_at": created.isoformat()
         }
 

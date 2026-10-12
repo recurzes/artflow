@@ -4,6 +4,7 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.errors import NotFound
 from shared.models.user import User
 from shared.schemas.user import Verify18Submit
 
@@ -25,81 +26,43 @@ def _account_age_days(created_at: datetime | None) -> int | None:
     return max(0, delta.days)
 
 
+async def get_user_by_discord_id(
+        db: AsyncSession, discord_user_id: str
+) -> User | None:
+    return await db.scalar(
+        select(User).where(User.discord_user_id == discord_user_id)
+    )
+
+
+async def require_user_by_discord_id(db: AsyncSession, discord_user_id: str) -> User:
+    user = await get_user_by_discord_id(db, discord_user_id)
+    if user is None:
+        raise NotFound("User not found")
+    return user
+
+
 async def upsert_user(
         db: AsyncSession,
         *,
         discord_user_id: str,
-        is_phone_verified: bool = False,
         discord_account_created_at: datetime | None = None
-) -> User:
-    result = await db.execute(
-        select(User).where(User.discord_user_id == discord_user_id)
-    )
-    user = result.scalar_one_or_none()
-
-    if user is None:
-        user = User(
-            discord_user_id=discord_user_id,
-            is_phone_verified=is_phone_verified,
-            discord_account_created_at=discord_account_created_at
-        )
-        db.add(user)
-        await db.flush()
-
-    return user
-
-async def set_email(db: AsyncSession, *, discord_user_id: str, email: str) -> User | None:
-    result = await db.execute(
-        select(User).where(User.discord_user_id == discord_user_id)
-    )
-    user = result.scalar_one_or_none()
-    if user is None:
-        return None
-
-    user.email = email
-    await db.flush()
-    return user
-
-async def verify_email(db: AsyncSession, *, discord_user_id: str) -> User | None:
-    result = await db.execute(
-        select(User).where(User.discord_user_id == discord_user_id)
-    )
-    user = result.scalar_one_or_none()
-    if user is None:
-        return None
-
-    user.is_email_verified = True
-    await db.flush()
-    return user
-
-async def get_user_by_discord_id(
-        db: AsyncSession, discord_user_id: str
-) -> User | None:
-    result = await db.execute(
-        select(User).where(User.discord_user_id == discord_user_id)
-    )
-    return result.scalar_one_or_none()
-
-
-async def ensure_user_discord_flags(
-        db: AsyncSession,
-        *,
-        discord_user_id: str,
-        is_phone_verified: bool,
-        discord_account_created_at: datetime | None
 ) -> User:
     user = await get_user_by_discord_id(db, discord_user_id)
     if user is None:
         user = User(
             discord_user_id=discord_user_id,
-            is_phone_verified=is_phone_verified,
             discord_account_created_at=discord_account_created_at
         )
         db.add(user)
-    else:
-        user.is_phone_verified = is_phone_verified
-        if discord_account_created_at is not None:
-            user.discord_account_created_at = discord_account_created_at
+    elif discord_account_created_at is not None:
+        user.discord_account_created_at = discord_account_created_at
+    await db.flush()
+    return user
+
+
+async def verify_email(db: AsyncSession, *, discord_user_id: str) -> User:
+    user = await require_user_by_discord_id(db, discord_user_id)
+    user.is_email_verified = True
     await db.flush()
     return user
 
@@ -109,32 +72,28 @@ async def submit_18_verification(
         redis: Redis,
         body: Verify18Submit
 ) -> tuple[str, str | None]:
-    user = await ensure_user_discord_flags(
+    user = await upsert_user(
         db,
         discord_user_id=body.discord_user_id,
-        is_phone_verified=body.is_phone_verified,
         discord_account_created_at=body.discord_account_created_at
     )
     if user.is_18_verified:
         return "already_verified", None
 
+    pending_key = f"{_AGE_VERIFY_PENDING_PREFIX}{body.discord_user_id}"
     age_days = _account_age_days(user.discord_account_created_at)
-    age_ok = age_days is not None and age_days >= MIN_DISCORD_ACCOUNT_AGE_DAYS
-
-    if age_ok:
+    if age_days is not None and age_days >= MIN_DISCORD_ACCOUNT_AGE_DAYS:
         user.is_18_verified = True
         user.is_18_verified_at = _utcnow()
         await db.flush()
-        key = f"{_AGE_VERIFY_PENDING_PREFIX}{body.discord_user_id}"
-        await redis.delete(key)
+        await redis.delete(pending_key)
         return "approved", None
 
-    await redis.setex(
-        f"{_AGE_VERIFY_PENDING_PREFIX}{body.discord_user_id}",
-        _PENDING_TTL_SEC,
-        "1"
+    await redis.setex(pending_key, _PENDING_TTL_SEC, "1")
+    return (
+        "pending_mod",
+        f"Accounts younger than {MIN_DISCORD_ACCOUNT_AGE_DAYS} days are reviewed by a moderator"
     )
-    return "pending_mod", "Account must be at least 90 days old for auto-approval, or ask a mod"
 
 
 async def approve_18_verification(
@@ -142,10 +101,8 @@ async def approve_18_verification(
         redis: Redis,
         *,
         discord_user_id: str
-) -> User | None:
-    user = await get_user_by_discord_id(db, discord_user_id)
-    if user is None:
-        return None
+) -> User:
+    user = await require_user_by_discord_id(db, discord_user_id)
     user.is_18_verified = True
     user.is_18_verified_at = _utcnow()
     await db.flush()

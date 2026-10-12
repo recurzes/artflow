@@ -22,7 +22,6 @@ async def upsert_user(
     user = await user_service.upsert_user(
         db,
         discord_user_id=body.discord_user_id,
-        is_phone_verified=body.is_phone_verified,
         discord_account_created_at=body.discord_account_created_at
     )
     return UserRead.model_validate(user)
@@ -45,13 +44,7 @@ async def verify_email(
             detail="Verification token is invalid or has expired"
         )
 
-    user = await user_service.verify_email(db, discord_user_id=discord_user_id)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
+    await user_service.verify_email(db, discord_user_id=discord_user_id)
     await redis.delete(redis_key)
     return {"message": "Email verified successfully. You can close this tab"}
 
@@ -62,12 +55,7 @@ async def get_user(
         _auth: BotAuth,
         discord_user_id: str,
 ) -> UserRead:
-    user = await user_service.get_user_by_discord_id(db, discord_user_id)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
+    user = await user_service.require_user_by_discord_id(db, discord_user_id)
     return UserRead.model_validate(user)
 
 
@@ -78,8 +66,8 @@ async def submit_verify_18(
         redis: RedisClient,
         _auth: BotAuth
 ) -> Verify18Response:
-    status, detail = await user_service.submit_18_verification(db, redis, body)
-    return Verify18Response(status=status, detail=detail)
+    outcome, detail = await user_service.submit_18_verification(db, redis, body)
+    return Verify18Response(status=outcome, detail=detail)
 
 @router.post("/verify-18/approve", response_model=UserRead)
 async def approve_verify_18(
@@ -93,9 +81,4 @@ async def approve_verify_18(
         redis,
         discord_user_id=body.discord_user_id
     )
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found for this Discord ID"
-        )
     return UserRead.model_validate(user)

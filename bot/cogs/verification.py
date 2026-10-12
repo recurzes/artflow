@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 def _user_create_json(member: discord.Member) -> dict[str, Any]:
     return {
         "discord_user_id": str(member.id),
-        "is_phone_verified": bool(getattr(member.public_flags, "verified_phone", False)),
         "discord_account_created_at": member.created_at.isoformat()
     }
 
