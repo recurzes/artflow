@@ -221,3 +221,13 @@ async def test_server_errors_do_not_leak_internals():
 
     assert "Traceback" not in broken.value.detail
     await api.close()
+
+
+async def test_cancel(bot_api):
+    _, _, buyer, artist = await _setup(bot_api)
+    commission = await bot_api.create_commission(
+        server_id=artist["server_id"], artist_id=artist["id"], client_id=buyer["id"]
+    )
+    assert commission["client_discord_user_id"] == buyer["discord_user_id"]
+
+    assert (await bot_api.cancel(commission["id"]))["status"] == "CANCELLED"

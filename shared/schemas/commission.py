@@ -68,6 +68,8 @@ class CommissionRead(TimestampSchema):
     server_id: uuid.UUID
     artist_id: uuid.UUID
     client_id: uuid.UUID
+    artist_discord_user_id: str
+    client_discord_user_id: str
     discord_ticket_channel_id: str | None
     status: CommissionStatus
     commission_type: str | None

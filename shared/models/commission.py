@@ -168,3 +168,13 @@ class Commission(Base, TimestampMixin):
         back_populates="commission",
         uselist=False
     )
+
+    # Read by CommissionRead. Both need `client` and `artist.user` to be loaded,
+    # which every query in the commission service does.
+    @property
+    def client_discord_user_id(self) -> str:
+        return self.client.discord_user_id
+
+    @property
+    def artist_discord_user_id(self) -> str:
+        return self.artist.user.discord_user_id

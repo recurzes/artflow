@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from api.services import artist_service
 from shared.errors import Conflict, Forbidden, InvalidState, NotFound
@@ -107,8 +108,18 @@ def mark_cancelled(comm: Commission) -> None:
 
 # Reads
 
+# Every commission handed to a caller carries its client and its artist's user,
+# so the Discord IDs of both parties are always available.
+_WITH_PARTIES = (
+    joinedload(Commission.client, innerjoin=True),
+    joinedload(Commission.artist, innerjoin=True).joinedload(Artist.user, innerjoin=True),
+)
+
+
 async def get_commission(db: AsyncSession, commission_id: uuid.UUID) -> Commission:
-    result = await db.execute(select(Commission).where(Commission.id == commission_id))
+    result = await db.execute(
+        select(Commission).options(*_WITH_PARTIES).where(Commission.id == commission_id)
+    )
     comm = result.scalar_one_or_none()
     if comm is None:
         raise NotFound("Commission not found")
@@ -119,7 +130,10 @@ async def get_commission_for_update(db: AsyncSession, commission_id: uuid.UUID) 
     """Load and row-lock a commission so concurrent actions (a double-clicked
     button, a sweep racing a user) are applied one after the other."""
     result = await db.execute(
-        select(Commission).where(Commission.id == commission_id).with_for_update()
+        select(Commission)
+        .options(*_WITH_PARTIES)
+        .where(Commission.id == commission_id)
+        .with_for_update(of=Commission)
     )
     comm = result.scalar_one_or_none()
     if comm is None:
@@ -132,7 +146,9 @@ async def get_commission_by_discord_channel_id(
         discord_channel_id: str,
 ) -> Commission:
     result = await db.execute(
-        select(Commission).where(Commission.discord_ticket_channel_id == discord_channel_id)
+        select(Commission)
+        .options(*_WITH_PARTIES)
+        .where(Commission.discord_ticket_channel_id == discord_channel_id)
     )
     comm = result.scalar_one_or_none()
     if comm is None:
@@ -184,7 +200,7 @@ async def create_commission(db: AsyncSession, data: CommissionCreate) -> Commiss
     )
     db.add(comm)
     await db.flush()
-    return comm
+    return await get_commission(db, comm.id)
 
 
 async def open_ticket(
@@ -369,6 +385,38 @@ async def complete_commission(db: AsyncSession, commission_id: uuid.UUID) -> Com
     return comm
 
 
+async def cancel_commission(db: AsyncSession, commission_id: uuid.UUID) -> Commission:
+    """Cancel before any money has changed hands. After payment a commission can
+    only end through completion or a dispute."""
+    comm = await get_commission_for_update(db, commission_id)
+    if comm.status in (
+        CommissionStatus.IN_PROGRESS,
+        CommissionStatus.WIP,
+        CommissionStatus.DELIVERED,
+    ):
+        raise InvalidState(
+            "This commission has been paid for and can no longer be cancelled; "
+            "raise a dispute instead"
+        )
+    # DISPUTED -> CANCELLED is a valid transition, but only as a moderator's ruling.
+    _require_status(
+        comm,
+        CommissionStatus.INQUIRY,
+        CommissionStatus.INTAKE,
+        CommissionStatus.QUOTED,
+        CommissionStatus.TOS_PENDING,
+        CommissionStatus.PAYMENT_PENDING,
+        action="Cancelling"
+    )
+    if comm.status == CommissionStatus.PAYMENT_PENDING and comm.payment_receipt_url:
+        raise InvalidState(
+            "A payment receipt has been uploaded; raise a dispute instead of cancelling"
+        )
+    mark_cancelled(comm)
+    await db.flush()
+    return comm
+
+
 # Timers — called by the scheduled sweeps
 
 async def cancel_commission_unpaid(
@@ -415,7 +463,7 @@ async def list_payment_reminder_candidates(db: AsyncSession) -> list[Commission]
     now = _utcnow()
     window_end = now + timedelta(hours=12)
     result = await db.execute(
-        select(Commission).where(
+        select(Commission).options(*_WITH_PARTIES).where(
             Commission.status == CommissionStatus.PAYMENT_PENDING,
             Commission.payment_deadline_at.is_not(None),
             Commission.payment_reminder_sent.is_(False),
