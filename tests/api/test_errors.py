@@ -25,16 +25,9 @@ def test_status_codes():
 
 
 async def test_domain_error_reaches_the_client_with_its_message(client):
-    response = await client.post(
-        "/disputes",
-        json={
-            "commission_id": str(uuid.uuid4()),
-            "raised_by_discord_user_id": make_discord_id(),
-            "reason": "never delivered",
-        },
-    )
+    response = await client.get(f"/commissions/{uuid.uuid4()}")
     assert response.status_code == 404
-    assert "not found" in response.json()["detail"].lower()
+    assert response.json() == {"detail": "Commission not found"}
 
 
 async def test_commit_happens_before_the_response_is_sent(session_factory):
