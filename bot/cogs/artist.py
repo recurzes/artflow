@@ -462,7 +462,7 @@ class ArtistCog(commands.Cog, name="Artists"):
             name=str(interaction.user),
             icon_url=interaction.user.display_avatar.url
         )
-        embed.set_footer(text=f"DM {interaction.user.mention} to commission • /commissions open")
+        embed.set_footer(text=f"Commission {interaction.user.display_name} with /commission")
 
         await target_channel.send(embed=embed)
         await interaction.followup.send(
@@ -472,7 +472,7 @@ class ArtistCog(commands.Cog, name="Artists"):
 
     settings_group = app_commands.Group(
         name="settings",
-        description="Update your artist profile, TOS, and payment infor"
+        description="Update your artist profile, TOS, and payment info"
     )
 
     @settings_group.command(

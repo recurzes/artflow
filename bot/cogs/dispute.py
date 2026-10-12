@@ -170,10 +170,10 @@ class DisputeCog(commands.Cog, name="Disputes"):
             commission_id=str(comm["id"])
         )
         await interaction.channel.send(
-            content=f"{mention} **Disputed opened** by {interaction.user.mention}",
+            content=f"{mention} **Dispute opened** by {interaction.user.mention}",
             embed=base_embed(
                 title="Dispute",
-                description=f"**Reason:** {reason[:3000]}\n\n**Actions frozen** until a mod"
+                description=f"**Reason:** {reason[:3000]}\n\n**Actions frozen** until a mod "
                 "resolves (buttons below)"
             ),
             view=view

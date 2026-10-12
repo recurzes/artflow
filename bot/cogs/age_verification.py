@@ -82,7 +82,7 @@ class AgeGateModal(discord.ui.Modal, title="18+ verification"):
             detail = data.get("detail") or "A moderator will review your request"
             await interaction.followup.send(
                 embed=base_embed(
-                    title="Pending reivew",
+                    title="Pending review",
                     description=detail
                     + "\n\nA moderator can run `/age-approve` when you are approved"
                 ),

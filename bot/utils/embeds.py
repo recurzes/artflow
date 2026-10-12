@@ -92,7 +92,7 @@ def payment_instructions_embed(
 
 def public_review_embed(
         *,
-        artst_name: str,
+        artist_name: str,
         rating: int,
         body: str | None
 ) -> discord.Embed:
@@ -100,7 +100,7 @@ def public_review_embed(
     desc = f"{stars} ({rating}/5)"
     if body:
         desc += f"\n\n{body}"
-    return base_embed(f"Review — {artst_name}", desc, color=COLOR_SUCCESS)
+    return base_embed(f"Review — {artist_name}", desc, color=COLOR_SUCCESS)
 
 def completed_work_embed(
         *,
