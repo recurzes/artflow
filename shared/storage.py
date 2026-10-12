@@ -29,7 +29,26 @@ async def close_client() -> None:
         _client = None
 
 
-# Upload helpers
+# Stored references
+#
+# What gets saved in the database is "<bucket>/<path>", never a signed URL:
+# signed URLs expire, and a receipt has to stay readable for as long as a
+# dispute can be raised. A URL is signed at the moment someone needs to open
+# the file.
+
+def file_ref(bucket: str, key: str) -> str:
+    return f"{bucket}/{key}"
+
+
+async def signed_url_for(ref: str, expires_in: int = 3600) -> str:
+    # Rows written before references were stored hold a full URL; pass it through.
+    if ref.startswith(("http://", "https://")):
+        return ref
+    bucket, _, key = ref.partition("/")
+    return await get_signed_url(bucket, key, expires_in)
+
+
+# Upload helpers. Each returns the reference to store, not a URL.
 async def upload_portfolio_image(
         file_bytes: bytes,
         filename: str,
@@ -61,7 +80,7 @@ async def upload_wip_image(
         content_type=_content_type(filename),
         upsert=False
     )
-    return await get_signed_url(settings.storage_bucket_wip, key, expires_in=604800)
+    return file_ref(settings.storage_bucket_wip, key)
 
 async def upload_receipt(
         file_bytes: bytes,
@@ -77,7 +96,7 @@ async def upload_receipt(
         content_type=_content_type(filename),
         upsert=False
     )
-    return await get_signed_url(settings.storage_bucket_receipts, key, expires_in=3153600)
+    return file_ref(settings.storage_bucket_receipts, key)
 
 async def upload_delivery_file(
         file_bytes: bytes,
@@ -93,7 +112,7 @@ async def upload_delivery_file(
         content_type=_content_type(filename),
         upsert=False
     )
-    return await get_signed_url(settings.storage_bucket_wip, key, expires_in=604800)
+    return file_ref(settings.storage_bucket_wip, key)
 
 
 # URL Helpers

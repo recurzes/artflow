@@ -78,8 +78,8 @@ def _scene(user_id: int, status: str, **commission_fields):
 
 @pytest.fixture
 def storage(monkeypatch):
-    wip = AsyncMock(return_value="https://storage/wip.png")
-    final = AsyncMock(return_value="https://storage/final.png")
+    wip = AsyncMock(return_value="wip/commission-uuid/original/a.png")
+    final = AsyncMock(return_value="wip/commission-uuid/final/b.png")
     monkeypatch.setattr(cog, "upload_wip_image", wip)
     monkeypatch.setattr(cog, "upload_delivery_file", final)
     return wip, final
@@ -104,7 +104,7 @@ class TestWip:
         await self._wip(interaction, _attachment())
 
         api.post_wip.assert_awaited_once_with(
-            "commission-uuid", "https://storage/wip.png", "first sketch"
+            "commission-uuid", "wip/commission-uuid/original/a.png", "first sketch"
         )
         sent = ticket.send.await_args.kwargs
         assert sent["file"].filename == "wip.png"
@@ -149,7 +149,9 @@ class TestDeliver:
 
         await self._deliver(interaction, _attachment("final.png"))
 
-        api.deliver.assert_awaited_once_with("commission-uuid", "https://storage/final.png")
+        api.deliver.assert_awaited_once_with(
+            "commission-uuid", "wip/commission-uuid/final/b.png"
+        )
         sent = ticket.send.await_args.kwargs
         assert sent["file"].filename == "final.png"
         assert "/complete" in sent["embed"].description
@@ -175,17 +177,61 @@ class TestDeliver:
 
 
 class TestComplete:
-    async def test_completion_invites_a_review_and_showcases_the_piece(self):
+    @pytest.fixture
+    def download(self, monkeypatch):
+        download = AsyncMock(return_value=b"png-bytes")
+        monkeypatch.setattr(cog, "download", download)
+        return download
+
+    async def test_completion_invites_a_review_and_showcases_the_piece(self, download):
         interaction, api, ticket, showcase, _ = _scene(CLIENT_ID, "DELIVERED")
         api.complete.return_value = _commission(
-            "COMPLETED", delivery_file_url="https://storage/final.png"
+            "COMPLETED", delivery_file_key="wip/commission-uuid/final/b.png"
         )
+        api.get_commission_files.return_value = {
+            "receipt_url": None,
+            "delivery_url": "https://signed.example/final.png?token=abc",
+        }
         cog_instance = CommissionCog(interaction.client)
 
         await cog_instance.complete_cmd.callback(cog_instance, interaction)
 
         assert isinstance(ticket.send.await_args.kwargs["view"], ReviewPromptView)
-        assert sent_embeds(showcase)[0].image.url == "https://storage/final.png"
+        assert ticket.edit.await_args.kwargs["name"].startswith("closed-")
+        download.assert_awaited_once_with("https://signed.example/final.png?token=abc")
+        # attached, so the showcase post does not depend on a link that expires
+        posted = showcase.send.await_args.kwargs
+        assert posted["file"].filename == "completed.png"
+        assert posted["embed"].image.url == "attachment://completed.png"
+
+    async def test_non_image_deliveries_are_showcased_without_a_file(self, download):
+        interaction, api, ticket, showcase, _ = _scene(CLIENT_ID, "DELIVERED")
+
+        await announce_completed(
+            api,
+            interaction.guild,
+            ticket,
+            _commission("COMPLETED", delivery_file_key="wip/commission-uuid/final/layers.zip"),
+        )
+
+        download.assert_not_awaited()
+        posted = showcase.send.await_args.kwargs
+        assert "file" not in posted
+        assert not posted["embed"].image
+
+    async def test_showcase_still_posts_when_the_file_cannot_be_fetched(self, download):
+        interaction, api, ticket, showcase, _ = _scene(CLIENT_ID, "DELIVERED")
+        api.get_commission_files.return_value = {"delivery_url": "https://signed.example/x.png"}
+        download.return_value = None
+
+        await announce_completed(
+            api,
+            interaction.guild,
+            ticket,
+            _commission("COMPLETED", delivery_file_key="wip/commission-uuid/final/b.png"),
+        )
+
+        assert "file" not in showcase.send.await_args.kwargs
 
     async def test_nsfw_work_is_never_showcased(self):
         interaction, api, ticket, showcase, _ = _scene(CLIENT_ID, "DELIVERED")

@@ -74,7 +74,7 @@ class Scene:
         await self.post(f"{self.base}/quote", {"quoted_price_php": "1500.00"})
         await self.post(f"{self.base}/accept-quote")
         await self.post(f"{self.base}/tos-accept", {"tos_version_hash": self.artist["tos_hash"]})
-        await self.post(f"{self.base}/receipt", {"payment_receipt_url": "receipts/proof.png"})
+        await self.post(f"{self.base}/receipt", {"payment_receipt_key": "receipts/proof.png"})
         return await self.post(f"{self.base}/confirm-payment")
 
 
@@ -104,19 +104,19 @@ async def test_commission_from_request_to_review(client):
     assert pending["status"] == "PAYMENT_PENDING"
     assert pending["payment_deadline_at"] is not None
 
-    await scene.post(f"{scene.base}/receipt", {"payment_receipt_url": "receipts/proof.png"})
+    await scene.post(f"{scene.base}/receipt", {"payment_receipt_key": "receipts/proof.png"})
     paid = await scene.post(f"{scene.base}/confirm-payment")
     assert paid["status"] == "IN_PROGRESS"
     assert paid["payment_confirmed_at"] is not None
 
     assert (
-        await scene.post(f"{scene.base}/wip-update", {"image_url": "wip/sketch.png"})
+        await scene.post(f"{scene.base}/wip-update", {"image_key": "wip/sketch.png"})
     )["status"] == "WIP"
     assert (
-        await scene.post(f"{scene.base}/wip-update", {"image_url": "wip/colour.png"})
+        await scene.post(f"{scene.base}/wip-update", {"image_key": "wip/colour.png"})
     )["status"] == "WIP"
 
-    delivered = await scene.post(f"{scene.base}/deliver", {"final_file_url": "wip/final.png"})
+    delivered = await scene.post(f"{scene.base}/deliver", {"file_key": "wip/final.png"})
     assert delivered["status"] == "DELIVERED"
     assert delivered["delivery_auto_accept_at"] is not None
 
@@ -146,7 +146,7 @@ async def test_steps_cannot_be_skipped(client):
         ("accept-quote", None),
         ("tos-accept", {"tos_version_hash": scene.artist["tos_hash"]}),
         ("confirm-payment", None),
-        ("deliver", {"final_file_url": "wip/final.png"}),
+        ("deliver", {"file_key": "wip/final.png"}),
         ("complete", None),
     ):
         response = await client.post(f"{scene.base}/{path}", json=body)
@@ -158,7 +158,7 @@ async def test_steps_cannot_be_skipped(client):
 async def test_dispute_freezes_the_commission_until_resolved(client):
     scene = await Scene(client).build()
     await scene.advance_to_in_progress()
-    await scene.post(f"{scene.base}/wip-update", {"image_url": "wip/sketch.png"})
+    await scene.post(f"{scene.base}/wip-update", {"image_key": "wip/sketch.png"})
 
     dispute = await scene.post(
         "/disputes",
@@ -173,8 +173,8 @@ async def test_dispute_freezes_the_commission_until_resolved(client):
 
     # Frozen: neither side can move it forward.
     for path, body in (
-        ("wip-update", {"image_url": "wip/again.png"}),
-        ("deliver", {"final_file_url": "wip/final.png"}),
+        ("wip-update", {"image_key": "wip/again.png"}),
+        ("deliver", {"file_key": "wip/final.png"}),
         ("complete", None),
     ):
         response = await client.post(f"{scene.base}/{path}", json=body)
@@ -215,8 +215,8 @@ async def test_artist_at_capacity_frees_a_slot_when_a_commission_ends(client):
     }
     assert (await client.post("/commissions", json=body)).status_code == 409
 
-    await scene.post(f"{scene.base}/wip-update", {"image_url": "wip/sketch.png"})
-    await scene.post(f"{scene.base}/deliver", {"final_file_url": "wip/final.png"})
+    await scene.post(f"{scene.base}/wip-update", {"image_key": "wip/sketch.png"})
+    await scene.post(f"{scene.base}/deliver", {"file_key": "wip/final.png"})
     await scene.post(f"{scene.base}/complete")
 
     assert (await client.post("/commissions", json=body)).status_code == 201

@@ -106,19 +106,14 @@ def completed_work_embed(
         *,
         artist_name: str,
         commission_id_display: str,
-        delivery_file_url: str | None
+        image_filename: str | None = None
 ) -> discord.Embed:
+    """`image_filename` names a file attached to the same message."""
     embed = base_embed(
         title="Completed work",
         description=f"Artist: **{artist_name}**\nCommission: `{commission_id_display}`",
         color=COLOR_SUCCESS
     )
-    if delivery_file_url and _looks_like_image_url(delivery_file_url):
-        embed.set_image(url=delivery_file_url)
-    elif delivery_file_url:
-        embed.add_field(name="File", value=delivery_file_url, inline=False)
+    if image_filename:
+        embed.set_image(url=f"attachment://{image_filename}")
     return embed
-
-def _looks_like_image_url(url: str) -> bool:
-    lower = url.split("?", maxsplit=1)[0].lower()
-    return lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))

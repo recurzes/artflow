@@ -216,6 +216,10 @@ class APIClient:
     async def get_commission_for_channel(self, channel_id: int | str) -> Json:
         return await self._request("GET", f"/commissions/by-discord-channel/{channel_id}")
 
+    async def get_commission_files(self, commission_id: str) -> Json:
+        """Short-lived links: `receipt_url` and `delivery_url` (either may be None)."""
+        return await self._request("GET", f"/commissions/{commission_id}/files")
+
     async def create_commission(
             self,
             *,
@@ -281,26 +285,26 @@ class APIClient:
             json={"tos_version_hash": tos_hash},
         )
 
-    async def upload_receipt(self, commission_id: str, receipt_url: str) -> Json:
+    async def upload_receipt(self, commission_id: str, receipt_key: str) -> Json:
         return await self._request(
             "POST",
             f"/commissions/{commission_id}/receipt",
-            json={"payment_receipt_url": receipt_url},
+            json={"payment_receipt_key": receipt_key},
         )
 
     async def confirm_payment(self, commission_id: str) -> Json:
         return await self._request("POST", f"/commissions/{commission_id}/confirm-payment")
 
-    async def post_wip(self, commission_id: str, image_url: str, note: str | None = None) -> Json:
+    async def post_wip(self, commission_id: str, image_key: str, note: str | None = None) -> Json:
         return await self._request(
             "POST",
             f"/commissions/{commission_id}/wip-update",
-            json={"image_url": image_url, "artist_note": note},
+            json={"image_key": image_key, "artist_note": note},
         )
 
-    async def deliver(self, commission_id: str, file_url: str) -> Json:
+    async def deliver(self, commission_id: str, file_key: str) -> Json:
         return await self._request(
-            "POST", f"/commissions/{commission_id}/deliver", json={"final_file_url": file_url}
+            "POST", f"/commissions/{commission_id}/deliver", json={"file_key": file_key}
         )
 
     async def complete(self, commission_id: str) -> Json:

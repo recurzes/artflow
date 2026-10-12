@@ -65,7 +65,7 @@ async def open_dispute(
             raise Conflict("A dispute for this commission was already resolved")
         return existing
 
-    if comm.status == CommissionStatus.PAYMENT_PENDING and not comm.payment_receipt_url:
+    if comm.status == CommissionStatus.PAYMENT_PENDING and not comm.payment_receipt_key:
         raise InvalidState(
             "Nothing has been paid yet, so there is nothing to dispute; "
             "upload the payment receipt first"

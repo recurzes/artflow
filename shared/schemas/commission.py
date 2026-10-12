@@ -40,17 +40,17 @@ class TosAcceptBody(BaseModel):
 
 class ReceiptUploadBody(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    payment_receipt_url: str
+    payment_receipt_key: str
 
 
 class DeliverySubmitBody(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    final_file_url: str
+    file_key: str
 
 
 class WipCreateBody(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    image_url: str
+    image_key: str
     artist_note: str | None = None
 
 
@@ -81,7 +81,7 @@ class CommissionRead(TimestampSchema):
     tos_accepted_at: datetime | None
     tos_version_hash: str | None
     payment_method: PaymentMethod | None
-    payment_receipt_url: str | None
+    payment_receipt_key: str | None
     payment_confirmed_at: datetime | None
     revisions_used: int
     revisions_allowed: int
@@ -90,6 +90,13 @@ class CommissionRead(TimestampSchema):
     completed_at: datetime | None
     payment_deadline_at: datetime | None
     payment_reminder_sent: bool
-    delivery_file_url: str | None
+    delivery_file_key: str | None
     delivery_auto_accept_at: datetime | None
     platform_fee_php: Decimal | None
+
+
+class CommissionFiles(BaseModel):
+    """Short-lived links to a commission's stored files, signed on request."""
+
+    receipt_url: str | None
+    delivery_url: str | None

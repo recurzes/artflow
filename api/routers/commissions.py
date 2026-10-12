@@ -8,6 +8,7 @@ from api.services import commission_service, review_service
 from shared.models.commission import PaymentMethod
 from shared.schemas.commission import (
     CommissionCreate,
+    CommissionFiles,
     CommissionRead,
     CounterOfferBody,
     DeliverySubmitBody,
@@ -55,6 +56,15 @@ async def get_commission(
 ) -> CommissionRead:
     comm = await commission_service.get_commission(db, commission_id)
     return CommissionRead.model_validate(comm)
+
+@router.get("/{commission_id}/files", response_model=CommissionFiles)
+async def get_commission_files(
+        commission_id: uuid.UUID,
+        db: DBSession,
+        _auth: BotAuth
+) -> CommissionFiles:
+    urls = await commission_service.get_file_urls(db, commission_id)
+    return CommissionFiles(**urls)
 
 @router.post("/{commission_id}/ticket", response_model=CommissionRead)
 async def open_ticket(
@@ -137,7 +147,7 @@ async def upload_receipt(
     comm = await commission_service.upload_receipt(
         db,
         commission_id,
-        body.payment_receipt_url
+        body.payment_receipt_key
     )
     return CommissionRead.model_validate(comm)
 
@@ -172,7 +182,7 @@ async def deliver(
         db: DBSession,
         _auth: BotAuth
 ) -> CommissionRead:
-    comm = await commission_service.deliver(db, commission_id, body.final_file_url)
+    comm = await commission_service.deliver(db, commission_id, body.file_key)
     return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/complete", response_model=CommissionRead)

@@ -133,13 +133,13 @@ ACTIONS: dict[str, tuple[str, dict | None, set[S], S | None]] = {
     ),
     "receipt": (
         "receipt",
-        {"payment_receipt_url": "receipts/abc.png"},
+        {"payment_receipt_key": "receipts/abc.png"},
         {S.PAYMENT_PENDING},
         S.PAYMENT_PENDING,
     ),
     "confirm-payment": ("confirm-payment", None, {S.PAYMENT_PENDING}, S.IN_PROGRESS),
-    "wip-update": ("wip-update", {"image_url": "wip/abc.png"}, {S.IN_PROGRESS, S.WIP}, S.WIP),
-    "deliver": ("deliver", {"final_file_url": "wip/final.png"}, {S.WIP}, S.DELIVERED),
+    "wip-update": ("wip-update", {"image_key": "wip/abc.png"}, {S.IN_PROGRESS, S.WIP}, S.WIP),
+    "deliver": ("deliver", {"file_key": "wip/final.png"}, {S.WIP}, S.DELIVERED),
     "complete": ("complete", None, {S.DELIVERED}, S.COMPLETED),
     "cancel": (
         "cancel",
@@ -244,7 +244,7 @@ async def test_deliver_before_any_wip_explains_what_to_do(client, db):
     commission = await make_commission(db, status=S.IN_PROGRESS)
 
     response = await client.post(
-        f"/commissions/{commission.id}/deliver", json={"final_file_url": "wip/final.png"}
+        f"/commissions/{commission.id}/deliver", json={"file_key": "wip/final.png"}
     )
 
     assert response.status_code == 409
@@ -264,7 +264,7 @@ async def test_complete_records_the_platform_fee(client, db):
 
 async def test_cancel_is_refused_once_a_receipt_is_uploaded(client, db):
     commission = await make_commission(
-        db, status=S.PAYMENT_PENDING, payment_receipt_url="receipts/abc.png"
+        db, status=S.PAYMENT_PENDING, payment_receipt_key="receipts/abc.png"
     )
 
     response = await client.post(f"/commissions/{commission.id}/cancel")

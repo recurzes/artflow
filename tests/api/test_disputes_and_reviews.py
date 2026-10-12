@@ -86,7 +86,7 @@ class TestOpenDispute:
     async def test_unconfirmed_payment_can_be_disputed_once_a_receipt_exists(self, client, db):
         _, buyer, unpaid = await _scene(db, S.PAYMENT_PENDING)
         _, payer, paid = await _scene(
-            db, S.PAYMENT_PENDING, payment_receipt_url="receipts/abc.png"
+            db, S.PAYMENT_PENDING, payment_receipt_key="receipts/abc.png"
         )
 
         no_receipt = await client.post("/disputes", json=_dispute_body(unpaid, buyer))

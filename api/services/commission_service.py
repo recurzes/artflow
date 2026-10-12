@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from api.services import artist_service
+from shared import storage
 from shared.errors import Conflict, Forbidden, InvalidState, NotFound
 from shared.models.artist import Artist, ArtistStatus
 from shared.models.commission import Commission, CommissionStatus, PaymentMethod
@@ -154,6 +155,21 @@ async def get_commission_by_discord_channel_id(
     if comm is None:
         raise NotFound("No commission for this channel")
     return comm
+
+
+async def get_file_urls(db: AsyncSession, commission_id: uuid.UUID) -> dict[str, str | None]:
+    """Fresh, short-lived links to the commission's receipt and final file."""
+    comm = await get_commission(db, commission_id)
+    return {
+        "receipt_url": (
+            await storage.signed_url_for(comm.payment_receipt_key)
+            if comm.payment_receipt_key else None
+        ),
+        "delivery_url": (
+            await storage.signed_url_for(comm.delivery_file_key)
+            if comm.delivery_file_key else None
+        ),
+    }
 
 
 # Use cases
@@ -309,11 +325,11 @@ async def confirm_tos_acceptance(
 async def upload_receipt(
         db: AsyncSession,
         commission_id: uuid.UUID,
-        payment_receipt_url: str
+        payment_receipt_key: str
 ) -> Commission:
     comm = await get_commission_for_update(db, commission_id)
     _require_status(comm, CommissionStatus.PAYMENT_PENDING, action="Uploading a receipt")
-    comm.payment_receipt_url = payment_receipt_url
+    comm.payment_receipt_key = payment_receipt_key
     await db.flush()
     return comm
 
@@ -348,7 +364,7 @@ async def create_wip_update(
     db.add(
         WipUpdate(
             commission_id=comm.id,
-            image_url=body.image_url,
+            image_key=body.image_key,
             artist_note=body.artist_note
         )
     )
@@ -361,7 +377,7 @@ async def create_wip_update(
 async def deliver(
         db: AsyncSession,
         commission_id: uuid.UUID,
-        final_file_url: str
+        file_key: str
 ) -> Commission:
     comm = await get_commission_for_update(db, commission_id)
     if comm.status == CommissionStatus.IN_PROGRESS:
@@ -369,7 +385,7 @@ async def deliver(
     _require_status(comm, CommissionStatus.WIP, action="Delivering")
 
     now = _utcnow()
-    comm.delivery_file_url = final_file_url
+    comm.delivery_file_key = file_key
     comm.delivered_at = now
     comm.delivery_auto_accept_at = now + timedelta(hours=DELIVERY_AUTO_ACCEPT_HOURS)
     _transition(comm, CommissionStatus.DELIVERED)
@@ -408,7 +424,7 @@ async def cancel_commission(db: AsyncSession, commission_id: uuid.UUID) -> Commi
         CommissionStatus.PAYMENT_PENDING,
         action="Cancelling"
     )
-    if comm.status == CommissionStatus.PAYMENT_PENDING and comm.payment_receipt_url:
+    if comm.status == CommissionStatus.PAYMENT_PENDING and comm.payment_receipt_key:
         raise InvalidState(
             "A payment receipt has been uploaded; raise a dispute instead of cancelling"
         )
