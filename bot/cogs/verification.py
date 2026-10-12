@@ -123,7 +123,6 @@ async def _send_email_verification_dm(bot: commands.Bot, member: discord.Member)
 class VerificationCog(commands.Cog, name="Verification"):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        bot.add_view(TOSAcceptButton())
 
     @app_commands.command(
         name="setup-tos",
@@ -144,3 +143,4 @@ class VerificationCog(commands.Cog, name="Verification"):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(VerificationCog(bot))
+    bot.add_view(TOSAcceptButton())

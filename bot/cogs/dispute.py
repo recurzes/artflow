@@ -1,117 +1,127 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Literal
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.cogs.commission import announce_completed
 from bot.utils.api_client import APIError
 from bot.utils.audit_log import format_commission_snapshot, post_admin_log
-from bot.utils.embeds import base_embed, error_embed, success_embed
+from bot.utils.embeds import base_embed
+from bot.utils.permissions import is_staff
+from bot.utils.replies import reply_error, reply_success
+from bot.utils.tickets import TicketError, ticket_commission
 from shared.discord_layout import ROLE_MODERATOR
 
 logger = logging.getLogger(__name__)
 
+Outcome = Literal["CANCELLED", "COMPLETED"]
+
+OUTCOME_LABELS: dict[str, str] = {
+    "CANCELLED": "Commission cancelled per dispute resolution",
+    "COMPLETED": "Commission marked completed per dispute resolution",
+}
+
+
+async def resolve_dispute_flow(
+        interaction: discord.Interaction,
+        *,
+        outcome: Outcome,
+        note: str = ""
+) -> bool:
+    """A moderator rules on the dispute of the ticket this was invoked in.
+
+    Shared by the buttons under the dispute message and `/dispute-resolve`.
+    Nothing is remembered between the dispute being raised and resolved: the
+    commission comes from the channel and the dispute from the commission.
+    """
+    if not is_staff(interaction.user):
+        await reply_error(interaction, "Only moderators can resolve a dispute")
+        return False
+
+    api = interaction.client.api
+    label = OUTCOME_LABELS[outcome]
+    resolution = f"{label} (mod {interaction.user.id})"
+    if note.strip():
+        resolution += f": {note.strip()}"
+    try:
+        comm = await ticket_commission(interaction)
+        dispute = await api.get_dispute_for_commission(comm["id"])
+        await api.resolve_dispute(
+            dispute["id"],
+            resolved_by=interaction.user.id,
+            resolution=resolution,
+            outcome=outcome
+        )
+        comm = await api.get_commission(comm["id"])
+    except TicketError as exc:
+        await reply_error(interaction, str(exc))
+        return False
+    except APIError as exc:
+        await reply_error(interaction, exc.detail)
+        return False
+
+    description = f"{label}\nResolved by {interaction.user.mention}"
+    if note.strip():
+        description += f"\n\n**Note:** {note.strip()[:1500]}"
+    await interaction.channel.send(
+        content=f"<@{comm['client_discord_user_id']}> <@{comm['artist_discord_user_id']}>",
+        embed=base_embed(title="Dispute resolved", description=description)
+    )
+    await post_admin_log(
+        interaction.guild,
+        title="Dispute resolved",
+        description=resolution[:2000],
+        fields={"Dispute": str(dispute["id"]), **format_commission_snapshot(comm)}
+    )
+    if outcome == "COMPLETED":
+        await announce_completed(api, interaction.guild, interaction.channel, comm)
+
+    await reply_success(interaction, "Dispute resolved")
+    return True
+
 
 class DisputeResolveView(discord.ui.View):
-    def __init__(
-            self,
-            bot: commands.Bot,
-            *,
-            dispute_id: str,
-            commission_id: str
-    ) -> None:
-        super().__init__(timeout=86400 * 7)
-        self.bot = bot
-        self.dispute_id = dispute_id
-        self.commission_id = commission_id
+    """The moderator's buttons under a dispute. Stateless and registered at
+    startup, so a dispute can still be resolved after the bot restarts."""
+
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
 
     @discord.ui.button(
         label="Resolve: cancel commission",
-        style=discord.ButtonStyle.danger
+        style=discord.ButtonStyle.danger,
+        custom_id="artflow:dispute_resolve_cancel"
     )
     async def resolve_cancel(
             self,
             interaction: discord.Interaction,
             button: discord.ui.Button
     ) -> None:
-        await self._resolve(
-            interaction,
-            set_status="CANCELLED",
-            label="Commission cancelled per dispute resolution"
-        )
+        await self._resolve(interaction, "CANCELLED")
 
     @discord.ui.button(
         label="Resolve: mark completed",
-        style=discord.ButtonStyle.success
+        style=discord.ButtonStyle.success,
+        custom_id="artflow:dispute_resolve_complete"
     )
     async def resolve_complete(
             self,
             interaction: discord.Interaction,
             button: discord.ui.Button
     ) -> None:
-        await self._resolve(
-            interaction,
-            set_status="COMPLETED",
-            label="Commission marked completed per dispute resolution"
-        )
+        await self._resolve(interaction, "COMPLETED")
 
-    async def _resolve(
-            self,
-            interaction: discord.Interaction,
-            *,
-            set_status: str,
-            label: str
-    ) -> None:
-        u = interaction.user
-        if not isinstance(u, discord.Member):
-            await interaction.response.send_message(
-                "Use this in the server",
-                ephemeral=True
-            )
-            return
-        can = u.guild_permissions.administrator or any(
-            r.name == ROLE_MODERATOR for r in u.roles
-        )
-        if not can:
-            await interaction.response.send_message(
-                "Only moderators can resolve",
-                ephemeral=True
-            )
-            return
-        await interaction.response.defer()
-        try:
-            await self.bot.api.resolve_dispute(
-                self.dispute_id,
-                resolved_by=interaction.user.id,
-                resolution=f"{label} (mod {interaction.user.id})",
-                outcome=set_status
-            )
-        except APIError as exc:
-            await interaction.followup.send(
-                embed=error_embed(f"Resolve failed: {exc.detail}"),
-                ephemeral=True
-            )
-            return
-        for child in self.children:
-            if isinstance(child, discord.ui.Button):
-                child.disabled = True
-        await interaction.message.edit(
-            content=f"**Resolved** by {interaction.user.mention} — {label}",
-            view=self
-        )
-        if interaction.guild:
-            await post_admin_log(
-                interaction.guild,
-                title="Dispute resolved",
-                description=label,
-                fields={
-                    "Dispute": self.dispute_id,
-                    "Commission": self.commission_id
-                }
-            )
+    async def _resolve(self, interaction: discord.Interaction, outcome: Outcome) -> None:
+        await interaction.response.defer(ephemeral=True)
+        if await resolve_dispute_flow(interaction, outcome=outcome):
+            try:
+                await interaction.message.edit(view=None)
+            except discord.HTTPException:
+                logger.warning("Could not remove the buttons from a resolved dispute message")
 
 
 class DisputeCog(commands.Cog, name="Disputes"):
@@ -123,72 +133,76 @@ class DisputeCog(commands.Cog, name="Disputes"):
         description="Raise a dispute for the commission in this ticket channel"
     )
     @app_commands.describe(reason="Describe why you are raising a dispute")
-    async def dispute(self, interaction: discord.Interaction, reason: str) -> None:
+    async def dispute(
+            self,
+            interaction: discord.Interaction,
+            reason: app_commands.Range[str, 1, 2000]
+    ) -> None:
         await interaction.response.defer(ephemeral=True)
-        if not interaction.guild or not isinstance(
-            interaction.channel,
-            discord.TextChannel
-        ):
-            await interaction.followup.send(
-                embed=error_embed("Use in a server ticket channel"),
-                ephemeral=True
-            )
-            return
         try:
-            comm: dict[str, Any] = await self.bot.api.get_commission_for_channel(
-                interaction.channel.id
-            )
-        except APIError:
-            await interaction.followup.send(
-                embed=error_embed("No commission for this channel"),
-                ephemeral=True
-            )
-            return
-
-        try:
-            data = await self.bot.api.open_dispute(
+            comm = await ticket_commission(interaction)
+            await self.bot.api.open_dispute(
                 comm["id"],
                 raised_by=interaction.user.id,
                 reason=reason
             )
+            comm = await self.bot.api.get_commission(comm["id"])
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
+            return
         except APIError as exc:
-            await interaction.followup.send(
-                embed=error_embed(f"Dispute failed: {exc.detail}"),
-                ephemeral=True
-            )
+            await reply_error(interaction, exc.detail)
             return
 
-        dispute_id = str(data.get("id", ""))
         mod_role = discord.utils.get(
             interaction.guild.roles,
             name=ROLE_MODERATOR
         )
         mention = mod_role.mention if mod_role else "@moderators"
-        view = DisputeResolveView(
-            self.bot,
-            dispute_id=dispute_id,
-            commission_id=str(comm["id"])
-        )
         await interaction.channel.send(
             content=f"{mention} **Dispute opened** by {interaction.user.mention}",
             embed=base_embed(
                 title="Dispute",
-                description=f"**Reason:** {reason[:3000]}\n\n**Actions frozen** until a mod "
-                "resolves (buttons below)"
+                description=f"**Reason:** {reason}\n\n**Actions frozen** until a mod "
+                "resolves (buttons below, or `/dispute-resolve`)"
             ),
-            view=view
+            view=DisputeResolveView()
         )
         await post_admin_log(
             interaction.guild,
             title="Dispute opened",
-            description=reason[:2000],
+            description=reason,
             fields=format_commission_snapshot(comm)
         )
+        await reply_success(interaction, "Dispute recorded", "Moderators have been notified")
 
-        await interaction.followup.send(
-            embed=success_embed("Dispute recorded", "Moderators have been notified"),
-            ephemeral=True
-        )
+    @app_commands.command(
+        name="dispute-resolve",
+        description="[Mod] Resolve the dispute in this ticket channel"
+    )
+    @app_commands.describe(
+        outcome="What happens to the commission",
+        note="Optional explanation shown to both parties"
+    )
+    @app_commands.choices(
+        outcome=[
+            app_commands.Choice(name="Cancel the commission", value="CANCELLED"),
+            app_commands.Choice(name="Mark the commission completed", value="COMPLETED"),
+        ]
+    )
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.guild_only()
+    async def dispute_resolve(
+            self,
+            interaction: discord.Interaction,
+            outcome: app_commands.Choice[str],
+            note: str = ""
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        await resolve_dispute_flow(interaction, outcome=outcome.value, note=note)
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(DisputeCog(bot))
+    # Persistent: a dispute raised before a restart can still be resolved after it.
+    bot.add_view(DisputeResolveView())

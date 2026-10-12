@@ -19,6 +19,16 @@ async def open_dispute(
     return DisputeRead.model_validate(row)
     
 
+@router.get("/by-commission/{commission_id}", response_model=DisputeRead)
+async def get_dispute_for_commission(
+        commission_id: uuid.UUID,
+        db: DBSession,
+        _auth: BotAuth
+) -> DisputeRead:
+    row = await dispute_service.require_dispute_for_commission(db, commission_id)
+    return DisputeRead.model_validate(row)
+
+
 @router.patch("/{dispute_id}/resolve", response_model=DisputeRead)
 async def resolve_dispute(
         dispute_id: uuid.UUID,

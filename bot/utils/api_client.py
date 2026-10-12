@@ -341,6 +341,9 @@ class APIClient:
             },
         )
 
+    async def get_dispute_for_commission(self, commission_id: str) -> Json:
+        return await self._request("GET", f"/disputes/by-commission/{commission_id}")
+
     async def resolve_dispute(
             self,
             dispute_id: str,
