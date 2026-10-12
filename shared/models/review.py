@@ -34,7 +34,8 @@ class Review(Base, TimestampMixin):
     artist_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("artists.id", ondelete="RESTRICT"),
-        nullable=False
+        nullable=False,
+        index=True
     )
     rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, false
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -51,21 +51,27 @@ class Commission(Base, TimestampMixin):
     server_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("servers.id", ondelete="CASCADE"),
-        nullable=False
+        nullable=False,
+        index=True
     )
     artist_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("artists.id", ondelete="RESTRICT"),
-        nullable=False
+        nullable=False,
+        index=True
     )
     client_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=False
+        nullable=False,
+        index=True
     )
+    # Looked up on every command run in a ticket; one commission per channel
     discord_ticket_channel_id: Mapped[str | None] = mapped_column(
         String(20),
-        nullable=True
+        nullable=True,
+        unique=True,
+        index=True
     )
     status: Mapped[CommissionStatus] = mapped_column(
         default=CommissionStatus.INQUIRY,
@@ -133,16 +139,19 @@ class Commission(Base, TimestampMixin):
     )
     payment_deadline_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        nullable=True
+        nullable=True,
+        index=True
     )
     payment_reminder_sent: Mapped[bool] = mapped_column(
         default=False,
+        server_default=false(),
         nullable=False
     )
     delivery_file_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     delivery_auto_accept_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
-        nullable=True
+        nullable=True,
+        index=True
     )
 
     # 3% platform fee
