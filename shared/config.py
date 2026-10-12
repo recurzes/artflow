@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     storage_bucket_receipts: str = "receipts"
 
     environment: str = "development"
-    api_base_url: str = "http://localhost:8007"
+    api_base_url: str = "http://localhost:8000"
 
     email_verify_ttl: int = 86400
 

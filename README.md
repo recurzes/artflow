@@ -199,6 +199,9 @@ See `.env.example` for the full reference. Required variables:
 
 Deployed on Oracle Cloud VPS via [Dokploy](https://dokploy.com). GitHub Actions builds and pushes Docker images on every push to `main`, then triggers Dokploy deploy webhooks for each service.
 
+The image does not run migrations on start. Run `alembic upgrade head` against the
+production database before the new API container takes traffic.
+
 Required GitHub Actions secrets:
 
 | Secret | Value |
