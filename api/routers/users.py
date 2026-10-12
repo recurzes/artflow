@@ -66,8 +66,8 @@ async def submit_verify_18(
         redis: RedisClient,
         _auth: BotAuth
 ) -> Verify18Response:
-    outcome, detail = await user_service.submit_18_verification(db, redis, body)
-    return Verify18Response(status=outcome, detail=detail)
+    outcome, detail, newly_queued = await user_service.submit_18_verification(db, redis, body)
+    return Verify18Response(status=outcome, detail=detail, newly_queued=newly_queued)
 
 @router.post("/verify-18/approve", response_model=UserRead)
 async def approve_verify_18(
