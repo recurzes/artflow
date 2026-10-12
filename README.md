@@ -153,6 +153,16 @@ API docs available at `http://localhost:8000/docs` once the API is running.
 docker compose --profile app up --build
 ```
 
+### Tests
+
+Tests need the Postgres container; they create and use their own `artflow_test` database.
+
+```bash
+docker compose up -d postgres
+uv run --extra dev pytest
+uv run --extra dev ruff check .
+```
+
 ### Database migrations
 
 ```bash
