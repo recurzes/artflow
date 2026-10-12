@@ -227,6 +227,13 @@ async def open_ticket(
     """Attach the Discord ticket channel; the commission is now waiting for the brief."""
     comm = await get_commission_for_update(db, commission_id)
     _require_status(comm, CommissionStatus.INQUIRY, action="Opening a ticket")
+    taken = await db.scalar(
+        select(Commission.id).where(
+            Commission.discord_ticket_channel_id == discord_ticket_channel_id
+        )
+    )
+    if taken is not None:
+        raise Conflict("That channel is already the ticket of another commission")
     comm.discord_ticket_channel_id = discord_ticket_channel_id
     _transition(comm, CommissionStatus.INTAKE)
     await db.flush()

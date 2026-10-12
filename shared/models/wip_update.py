@@ -19,7 +19,8 @@ class WipUpdate(Base, TimestampMixin):
     commission_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("commissions.id", ondelete="CASCADE"),
-        nullable=False
+        nullable=False,
+        index=True
     )
     image_key: Mapped[str] = mapped_column(Text, nullable=False)
     watermarked_key: Mapped[str | None] = mapped_column(Text, nullable=True)

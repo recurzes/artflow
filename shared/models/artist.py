@@ -3,7 +3,16 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +35,8 @@ class ArtistStatus(str, enum.Enum):
 
 class Artist(Base, TimestampMixin):
     __tablename__ = "artists"
+    # One artist profile per member per server
+    __table_args__ = (UniqueConstraint("user_id", "server_id", name="uq_artist_user_server"),)
 
     id: Mapped[uuid.UUID] = uuid_pk()
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -36,7 +47,8 @@ class Artist(Base, TimestampMixin):
     server_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("servers.id", ondelete="CASCADE"),
-        nullable=False
+        nullable=False,
+        index=True
     )
     display_name: Mapped[str] = mapped_column(
         String(100),
