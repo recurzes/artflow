@@ -18,9 +18,7 @@ from api.commissions.schemas import (
     WipCreateBody,
 )
 from api.dependencies import BotAuth, DBSession
-from api.services import review_service
 from shared.models.commission import PaymentMethod
-from shared.schemas.review import ReviewCreate, ReviewRead
 
 router = APIRouter(prefix="/commissions", tags=["commissions"])
 
@@ -221,17 +219,3 @@ async def cancel(
 ) -> CommissionRead:
     comm = await commission_service.cancel_commission(db, commission_id)
     return CommissionRead.model_validate(comm)
-
-@router.post(
-    "/{commission_id}/review",
-    response_model=ReviewRead,
-    status_code=status.HTTP_201_CREATED
-)
-async def create_commission_review(
-        commission_id: uuid.UUID,
-        body: ReviewCreate,
-        db: DBSession,
-        _auth: BotAuth
-) -> ReviewRead:
-    review = await review_service.create_review(db, commission_id, body)
-    return ReviewRead.model_validate(review)

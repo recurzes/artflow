@@ -7,11 +7,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.commissions import service as commission_service
+from api.reviews.schemas import ReviewCreate
 from shared.errors import Conflict, Forbidden, InvalidState
 from shared.models.artist import Artist
 from shared.models.commission import CommissionStatus
 from shared.models.review import Review
-from shared.schemas.review import ReviewCreate
 
 
 async def create_review(

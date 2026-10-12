@@ -12,6 +12,7 @@ from api.commissions import routes as commissions
 from api.dependencies import limiter
 from api.disputes import routes as disputes
 from api.errors import register_error_handlers
+from api.reviews import routes as reviews
 from api.routers import admin
 from api.servers import routes as servers
 from api.users import routes as users
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(artists.router)
     app.include_router(commissions.router)
+    app.include_router(reviews.router)
     app.include_router(disputes.router)
     app.include_router(servers.router)
     app.include_router(admin.router)
