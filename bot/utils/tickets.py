@@ -1,18 +1,51 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Literal
 
 import discord
 
 from bot.utils.api_client import APIError
-from shared.discord_layout import CATEGORY_CORE, ROLE_MODERATOR
+from shared.discord_layout import CATEGORY_CLOSED_TICKETS, CATEGORY_TICKETS, ROLE_MODERATOR
+
+logger = logging.getLogger(__name__)
+
+# Discord's limit on channels in one category
+MAX_CHANNELS_PER_CATEGORY = 50
 
 
 def _safe_channel_slug(label: str) -> str:
     s = re.sub(r"[^a-z0-9\-]", "-", label.lower())[:90]
     s = re.sub(r"-+", "-", s).strip("-")
     return s or "ticket"
+
+async def category_with_room(guild: discord.Guild, base_name: str) -> discord.CategoryChannel:
+    """The first category called `base_name`, `base_name 2`, ... that is not full,
+    created (hidden from @everyone) when none has room."""
+    by_name = {category.name: category for category in guild.categories}
+    index = 1
+    while True:
+        name = base_name if index == 1 else f"{base_name} {index}"
+        category = by_name.get(name)
+        if category is None:
+            overwrites: dict[Any, discord.PermissionOverwrite] = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False)
+            }
+            if guild.me is not None:
+                overwrites[guild.me] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    manage_channels=True
+                )
+            return await guild.create_category(
+                name,
+                overwrites=overwrites,
+                reason="ArtFlow commission tickets"
+            )
+        if len(category.channels) < MAX_CHANNELS_PER_CATEGORY:
+            return category
+        index += 1
+
 
 async def create_commission_ticket(
         guild: discord.Guild,
@@ -62,7 +95,7 @@ async def create_commission_ticket(
             embed_links=True
         )
 
-    category = discord.utils.get(guild.categories, name=CATEGORY_CORE)
+    category = await category_with_room(guild, CATEGORY_TICKETS)
     name = f"cm-{_safe_channel_slug(commission_label)}"
     return await guild.create_text_channel(
         name=name,
@@ -71,6 +104,33 @@ async def create_commission_ticket(
         nsfw=nsfw,
         reason="ArtFlow commission ticket"
     )
+
+
+async def close_ticket(channel: discord.TextChannel) -> None:
+    """Archive the ticket of a finished commission.
+
+    The channel is kept as a record: both parties can still read it and use its
+    buttons (to leave a review), but can no longer write in it. It moves out of
+    the active tickets category so that one does not fill up.
+    """
+    guild = channel.guild
+    overwrites = dict(channel.overwrites)
+    for target, overwrite in overwrites.items():
+        if isinstance(target, discord.Member) and target != guild.me:
+            overwrite.send_messages = False
+            overwrite.attach_files = False
+    try:
+        archive = await category_with_room(guild, CATEGORY_CLOSED_TICKETS)
+        name = channel.name if channel.name.startswith("closed-") else f"closed-{channel.name}"
+        await channel.edit(
+            name=name[:100],
+            category=archive,
+            overwrites=overwrites,
+            reason="ArtFlow: commission finished"
+        )
+    except discord.HTTPException:
+        # The commission is already finished; a ticket left open is only untidy.
+        logger.exception("Could not archive ticket channel %s", channel.id)
 
 
 class TicketError(Exception):

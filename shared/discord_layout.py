@@ -46,3 +46,7 @@ SHOWCASE_BY_SLUG: dict[str, str] = {
 CATEGORY_CORE = "ArtFlow — Core"
 CATEGORY_SHOWCASE = "ArtFlow — Showcase"
 CATEGORY_RECORDS = "ArtFlow — Records"
+# Commission tickets get their own categories: Discord allows 50 channels per
+# category, so these overflow into "<name> 2", "<name> 3", ...
+CATEGORY_TICKETS = "ArtFlow — Tickets"
+CATEGORY_CLOSED_TICKETS = "ArtFlow — Closed Tickets"

@@ -21,8 +21,14 @@ from bot.utils.embeds import (
     success_embed,
     warning_embed,
 )
+from bot.utils.permissions import is_staff
 from bot.utils.replies import reply_error, reply_success
-from bot.utils.tickets import TicketError, create_commission_ticket, ticket_commission
+from bot.utils.tickets import (
+    TicketError,
+    close_ticket,
+    create_commission_ticket,
+    ticket_commission,
+)
 from bot.utils.uploads import (
     IMAGE_TYPES,
     MAX_ARTWORK_BYTES,
@@ -243,8 +249,9 @@ async def announce_completed(
         channel: discord.TextChannel,
         comm: dict[str, Any]
 ) -> None:
-    """Tell the ticket the commission is done, invite a review, and show the
-    piece in the completed-works channel (never for NSFW commissions)."""
+    """Tell the ticket the commission is done, invite a review, archive the
+    ticket, and show the piece in the completed-works channel (never for NSFW
+    commissions)."""
     await channel.send(
         content=f"<@{comm['client_discord_user_id']}>",
         embed=success_embed(
@@ -253,6 +260,7 @@ async def announce_completed(
         ),
         view=ReviewPromptView()
     )
+    await close_ticket(channel)
     if comm.get("is_nsfw"):
         return
     try:
@@ -1085,6 +1093,40 @@ class CommissionCog(commands.Cog, name="Commissions"):
             await reply_error(interaction, str(exc))
             return
         await submit_review(interaction, comm, rating, comment or None)
+
+    @app_commands.command(
+        name="cancel",
+        description="Cancel this commission (only before payment)"
+    )
+    @app_commands.describe(reason="Why the commission is being cancelled")
+    async def cancel_cmd(
+            self,
+            interaction: discord.Interaction,
+            reason: app_commands.Range[str, 1, 1000]
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            comm = await ticket_commission(interaction)
+            parties = (comm["client_discord_user_id"], comm["artist_discord_user_id"])
+            if str(interaction.user.id) not in parties and not is_staff(interaction.user):
+                raise TicketError("Only the client, the artist or a moderator can cancel")
+            await self.bot.api.cancel(comm["id"])
+        except TicketError as exc:
+            await reply_error(interaction, str(exc))
+            return
+        except APIError as exc:
+            await reply_error(interaction, exc.detail)
+            return
+
+        await interaction.channel.send(
+            content=f"<@{comm['client_discord_user_id']}> <@{comm['artist_discord_user_id']}>",
+            embed=warning_embed(
+                "Commission cancelled",
+                f"Cancelled by {interaction.user.mention}\n\n**Reason:** {reason}"
+            )
+        )
+        await close_ticket(interaction.channel)
+        await reply_success(interaction, "Commission cancelled")
 
     @app_commands.command(
         name="revision",
