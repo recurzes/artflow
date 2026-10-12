@@ -2,7 +2,6 @@ from shared.schemas.artist import ArtistCreate, ArtistListItem, ArtistRead, Arti
 from shared.schemas.commission import (
     CommissionCreate,
     CommissionRead,
-    CommissionStatusUpdate,
     QuoteCreate,
 )
 from shared.schemas.common import TimestampSchema, UUIDSchema
@@ -20,7 +19,6 @@ __all__ = [
     "ArtistUpdate",
     "CommissionCreate",
     "CommissionRead",
-    "CommissionStatusUpdate",
     "QuoteCreate",
     "ServerCreate",
     "ServerRead",

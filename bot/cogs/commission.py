@@ -396,10 +396,7 @@ class QuoteActionsView(discord.ui.View):
                     ephemeral=True
                 )
                 return
-            await self.bot.api.patch(
-                f"/commissions/{comm['id']}/status",
-                json={"status": "TOS_PENDING"}
-            )
+            await self.bot.api.post(f"/commissions/{comm['id']}/accept-quote")
             artist = await self.bot.api.get(f"/artists/{comm['artist_id']}")
             tos = artist.get("tos_text") or ""
             if not tos:
@@ -619,14 +616,13 @@ class ArtistPickView(discord.ui.View):
                     "server_id": self.server_uuid,
                     "artist_id": artist_id,
                     "client_id": client_row["id"],
-                    "discord_ticket_channel_id": str(channel.id),
                     "is_nsfw": self._is_nsfw_request
                 },
             )
             comm_id = comm["id"]
-            await self.bot.api.patch(
-                f"/commissions/{comm_id}/status",
-                json={"status", "INTAKE"}
+            await self.bot.api.post(
+                f"/commissions/{comm_id}/ticket",
+                json={"discord_ticket_channel_id": str(channel.id)}
             )
 
             await channel.send(
@@ -823,10 +819,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
                     ephemeral=True
                 )
                 return
-            await self.bot.api.patch(
-                f"/commissions/{comm['id']}/status",
-                json={"status": "TOS_PENDING"}
-            )
+            await self.bot.api.post(f"/commissions/{comm['id']}/accept-quote")
             artist = await self.bot.api.get(f"/artists/{comm['artist_id']}")
             tos = artist.get("tos_text") or ""
             if not tos:
