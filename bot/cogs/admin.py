@@ -5,18 +5,36 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.utils.embeds import base_embed, error_embed
+from bot.utils.embeds import base_embed, error_embed, success_embed
+from bot.utils.guild_setup import repair_staff_channels
+from bot.utils.permissions import is_admin
 
 
-class AdminGroup(app_commands.Group, name="admin", description="Admin management commands"):
+# Discord ignores default_permissions on subcommands, so they are set on the group.
+class AdminGroup(
+    app_commands.Group,
+    name="admin",
+    description="Admin management commands",
+    default_permissions=discord.Permissions(administrator=True),
+    guild_only=True
+):
     def __init__(self) -> None:
         super().__init__()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # default_permissions can be overridden per server in Integrations settings.
+        if is_admin(interaction.user):
+            return True
+        await interaction.response.send_message(
+            embed=error_embed("Only server administrators can use this command"),
+            ephemeral=True
+        )
+        return False
 
     @app_commands.command(
         name="stats",
         description="Show server commission statistics"
     )
-    @app_commands.default_permissions(administrator=True)
     async def stats(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         if not interaction.guild:
@@ -47,7 +65,6 @@ class AdminGroup(app_commands.Group, name="admin", description="Admin management
         )
 
     @app_commands.command(name="artists", description="List all registered artists (paginated)")
-    @app_commands.default_permissions(administrator=True)
     async def artists(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         if not interaction.guild:
@@ -77,7 +94,6 @@ class AdminGroup(app_commands.Group, name="admin", description="Admin management
         )
 
     @app_commands.command(name="commissions", description="Show commission summary")
-    @app_commands.default_permissions(administrator=True)
     async def commissions(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         if not interaction.guild:
@@ -99,6 +115,26 @@ class AdminGroup(app_commands.Group, name="admin", description="Admin management
         desc = "\n".join(lines) if lines else "No commissions"
         await interaction.followup.send(
             embed=base_embed(title="Commissions by status", description=desc[:4000]),
+            ephemeral=True
+        )
+
+    @app_commands.command(
+        name="repair-permissions",
+        description="Re-apply staff-only permissions on the ArtFlow staff channels"
+    )
+    async def repair_permissions(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            repaired = await repair_staff_channels(interaction.guild)
+        except discord.Forbidden:
+            await interaction.followup.send(
+                embed=error_embed("I need the Manage Channels and Manage Roles permissions"),
+                ephemeral=True
+            )
+            return
+        listing = ", ".join(f"#{name}" for name in repaired) or "no staff channels found"
+        await interaction.followup.send(
+            embed=success_embed("Permissions repaired", f"Staff-only access applied to: {listing}"),
             ephemeral=True
         )
 

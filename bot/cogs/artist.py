@@ -13,10 +13,12 @@ from bot.utils.embeds import (
     success_embed,
     warning_embed,
 )
+from bot.utils.permissions import has_role, is_staff
 from shared.discord_layout import (
     CHANNEL_ARTIST_DIRECTORY,
     CHANNEL_COMMISSIONS_OPEN,
     CHANNEL_VERIFICATION_QUEUE,
+    ROLE_18_VERIFIED,
     ROLE_VERIFIED_ARTIST,
     SHOWCASE_BY_SLUG,
 )
@@ -200,6 +202,15 @@ class ApproveRejectView(discord.ui.View):
     def __init__(self, application: dict) -> None:
         super().__init__()
         self.application = application
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if is_staff(interaction.user):
+            return True
+        await interaction.response.send_message(
+            embed=error_embed("Only moderators can review artist applications"),
+            ephemeral=True
+        )
+        return False
 
     @discord.ui.button(
         label="Approve",
@@ -390,6 +401,25 @@ class ArtistCog(commands.Cog, name="Artists"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
+        if guild is None:
+            await interaction.followup.send(
+                embed=error_embed("Use this command in a server"),
+                ephemeral=True
+            )
+            return
+
+        if not has_role(interaction.user, ROLE_VERIFIED_ARTIST):
+            await interaction.followup.send(
+                embed=error_embed("Only verified artists can post to the showcase channels"),
+                ephemeral=True
+            )
+            return
+        if category == "nsfw" and not has_role(interaction.user, ROLE_18_VERIFIED):
+            await interaction.followup.send(
+                embed=error_embed("You need 18+ verification to post to the NSFW showcase"),
+                ephemeral=True
+            )
+            return
 
         channel_name = SHOWCASE_CHANNELS.get(category)
         if channel_name is None:
