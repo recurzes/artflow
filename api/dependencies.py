@@ -39,6 +39,9 @@ def verify_bot_secret(x_bot_secret: Annotated[str | None, Header()] = None) -> N
         )
 
 # Type aliases
-DBSession = Annotated[AsyncSession, Depends(get_db)]
+# scope="function": the session commits when the route function returns, before the
+# response is sent. With the default scope the bot could receive a 2xx for a write that
+# is not committed yet (or never is) and immediately read stale data.
+DBSession = Annotated[AsyncSession, Depends(get_db, scope="function")]
 RedisClient = Annotated[Redis, Depends(get_redis_client)]
 BotAuth = Annotated[None, Depends(verify_bot_secret)]

@@ -23,10 +23,6 @@ from shared.schemas.review import ReviewCreate, ReviewRead
 router = APIRouter(prefix="/commissions", tags=["commissions"])
 
 
-def _bad_request(exc: ValueError) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-
-
 @router.get(
     "/by-discord-channel/{discord_channel_id}",
     response_model=CommissionRead
@@ -53,11 +49,8 @@ async def create_commission(
         db: DBSession,
         _auth: BotAuth
 ) -> CommissionRead:
-    try:
-        comm = await commission_service.create_commission(db, body)
-        return CommissionRead.model_validate(comm)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    comm = await commission_service.create_commission(db, body)
+    return CommissionRead.model_validate(comm)
 
 @router.get("/{commission_id}", response_model=CommissionRead)
 async def get_commission(
@@ -77,11 +70,8 @@ async def update_commission_status(
         db: DBSession,
         _auth: BotAuth
 ) -> CommissionRead:
-    try:
-        comm = await commission_service.transition_status(db, commission_id, body)
-        return CommissionRead.model_validate(comm)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    comm = await commission_service.transition_status(db, commission_id, body)
+    return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/intake", response_model=CommissionRead)
 async def submit_intake(
@@ -90,11 +80,8 @@ async def submit_intake(
         db: DBSession,
         _auth: BotAuth
 ) -> CommissionRead:
-    try:
-        comm = await commission_service.submit_intake(db, commission_id, body.notes)
-        return CommissionRead.model_validate(comm)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    comm = await commission_service.submit_intake(db, commission_id, body.notes)
+    return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/counter-offer", response_model=CommissionRead)
 async def counter_offer(
@@ -103,15 +90,12 @@ async def counter_offer(
         db: DBSession,
         _auth: BotAuth
 ) -> CommissionRead:
-    try:
-        comm = await commission_service.request_counter_offer(
-            db,
-            commission_id,
-            notes=body.notes
-        )
-        return CommissionRead.model_validate(comm)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    comm = await commission_service.request_counter_offer(
+        db,
+        commission_id,
+        notes=body.notes
+    )
+    return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/quote", response_model=CommissionRead)
 async def apply_quote(
@@ -120,11 +104,8 @@ async def apply_quote(
         db: DBSession,
         _auth: BotAuth
 ) -> CommissionRead:
-    try:
-        comm = await commission_service.apply_quote(db, commission_id, body)
-        return CommissionRead.model_validate(comm)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    comm = await commission_service.apply_quote(db, commission_id, body)
+    return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/tos-accept", response_model=CommissionRead)
 async def accept_tos(
@@ -133,15 +114,12 @@ async def accept_tos(
         body: TosAcceptBody,
         _auth: BotAuth
 ) -> CommissionRead:
-    try:
-        comm = await commission_service.confirm_tos_acceptance(
-            db,
-            commission_id,
-            body.tos_version_hash
-        )
-        return CommissionRead.model_validate(comm)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    comm = await commission_service.confirm_tos_acceptance(
+        db,
+        commission_id,
+        body.tos_version_hash
+    )
+    return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/receipt", response_model=CommissionRead)
 async def upload_receipt(
@@ -150,15 +128,12 @@ async def upload_receipt(
         body: ReceiptUploadBody,
         _auth: BotAuth
 ) -> CommissionRead:
-    try:
-        comm = await commission_service.upload_receipt(
-            db,
-            commission_id,
-            body.payment_receipt_url
-        )
-        return CommissionRead.model_validate(comm)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    comm = await commission_service.upload_receipt(
+        db,
+        commission_id,
+        body.payment_receipt_url
+    )
+    return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/confirm-payment", response_model=CommissionRead)
 async def confirm_payment(
@@ -167,15 +142,12 @@ async def confirm_payment(
         _auth: BotAuth,
         method: Annotated[PaymentMethod | None, Query()] = None
 ) -> CommissionRead:
-    try:
-        comm = await commission_service.confirm_payment(
-            db,
-            commission_id,
-            payment_method=method
-        )
-        return CommissionRead.model_validate(comm)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    comm = await commission_service.confirm_payment(
+        db,
+        commission_id,
+        payment_method=method
+    )
+    return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/wip-update", response_model=CommissionRead)
 async def wip_update(
@@ -184,11 +156,8 @@ async def wip_update(
         db: DBSession,
         _auth: BotAuth
 ) -> CommissionRead:
-    try:
-        comm = await commission_service.create_wip_update(db, commission_id, body)
-        return CommissionRead.model_validate(comm)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    comm = await commission_service.create_wip_update(db, commission_id, body)
+    return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/deliver", response_model=CommissionRead)
 async def deliver(
@@ -197,11 +166,8 @@ async def deliver(
         db: DBSession,
         _auth: BotAuth
 ) -> CommissionRead:
-    try:
-        comm = await commission_service.deliver(db, commission_id, body.final_file_url)
-        return CommissionRead.model_validate(comm)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    comm = await commission_service.deliver(db, commission_id, body.final_file_url)
+    return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/complete", response_model=CommissionRead)
 async def complete(
@@ -209,11 +175,8 @@ async def complete(
         db: DBSession,
         _auth: BotAuth
 ) -> CommissionRead:
-    try:
-        comm = await commission_service.complete_commission(db, commission_id)
-        return CommissionRead.model_validate(comm)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    comm = await commission_service.complete_commission(db, commission_id)
+    return CommissionRead.model_validate(comm)
 
 @router.post(
     "/{commission_id}/review",
@@ -226,8 +189,5 @@ async def create_commission_review(
         db: DBSession,
         _auth: BotAuth
 ) -> ReviewRead:
-    try:
-        review = await review_service.create_review(db, commission_id, body)
-        return ReviewRead.model_validate(review)
-    except ValueError as e:
-        raise _bad_request(e) from e
+    review = await review_service.create_review(db, commission_id, body)
+    return ReviewRead.model_validate(review)

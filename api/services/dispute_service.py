@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from api.services.commission_service import PLATFORM_FEE_RATE
+from shared.errors import Conflict, Forbidden, InvalidState, NotFound
 from shared.models.commission import Commission, CommissionStatus
 from shared.models.dispute import Dispute, DisputeStatus
 from shared.models.user import User
@@ -41,7 +42,7 @@ async def open_dispute(
     )
     raiser = ruser.scalar_one_or_none()
     if raiser is None:
-        raise ValueError("Raising user not found. Complete server join / verification first")
+        raise NotFound("Raising user not found. Complete server join / verification first")
 
     rcomm = await db.execute(
         select(Commission)
@@ -50,17 +51,17 @@ async def open_dispute(
     )
     comm = rcomm.unique().scalar_one_or_none()
     if comm is None:
-        raise ValueError("Commission not found")
+        raise NotFound("Commission not found")
 
     is_client = comm.client_id == raiser.id
     is_artist = comm.artist is not None and comm.artist.user_id == raiser.id
     if not is_client and not is_artist:
-        raise ValueError("Only the client or the artist can open a dispute")
+        raise Forbidden("Only the client or the artist can open a dispute")
 
     existing = await get_dispute_by_commission_id(db, body.commission_id)
     if existing is not None:
         if existing.status == DisputeStatus.RESOLVED:
-            raise ValueError("A dispute for this commission was already resolved")
+            raise Conflict("A dispute for this commission was already resolved")
         if comm.status != CommissionStatus.DISPUTED:
             comm.status = CommissionStatus.DISPUTED
             await db.flush()
@@ -85,27 +86,27 @@ async def resolve_dispute(
 ) -> Dispute:
     drow = await get_dispute_by_id(db, dispute_id)
     if drow is None:
-        raise ValueError("Dispute not found")
+        raise NotFound("Dispute not found")
 
     if drow.status != DisputeStatus.OPEN:
-        raise ValueError("Dispute is not open")
+        raise InvalidState("Dispute is not open")
 
     rmod = await db.execute(
         select(User).where(User.discord_user_id == body.resolved_by_discord_user_id)
     )
     moderator = rmod.scalar_one_or_none()
     if moderator is None:
-        raise ValueError("Moderator not found in database")
+        raise NotFound("Moderator not found in database")
 
     rcomm = await db.execute(
         select(Commission).where(Commission.id == drow.commission_id)
     )
     comm_obj = rcomm.scalar_one_or_none()
     if comm_obj is None:
-        raise ValueError("Commission missing")
+        raise NotFound("Commission missing")
 
     if comm_obj.status != CommissionStatus.DISPUTED:
-        raise ValueError("Commission is not in DISPUTED status")
+        raise InvalidState("Commission is not in DISPUTED status")
 
     target = (
         CommissionStatus.COMPLETED
