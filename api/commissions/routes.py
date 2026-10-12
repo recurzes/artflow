@@ -3,10 +3,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, status
 
-from api.dependencies import BotAuth, DBSession
-from api.services import commission_service, review_service
-from shared.models.commission import PaymentMethod
-from shared.schemas.commission import (
+from api.commissions import service as commission_service
+from api.commissions.schemas import (
     CommissionCreate,
     CommissionFiles,
     CommissionRead,
@@ -19,6 +17,9 @@ from shared.schemas.commission import (
     TosAcceptBody,
     WipCreateBody,
 )
+from api.dependencies import BotAuth, DBSession
+from api.services import review_service
+from shared.models.commission import PaymentMethod
 from shared.schemas.review import ReviewCreate, ReviewRead
 
 router = APIRouter(prefix="/commissions", tags=["commissions"])

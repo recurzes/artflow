@@ -8,9 +8,10 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from api.artists import routes as artists
+from api.commissions import routes as commissions
 from api.dependencies import limiter
 from api.errors import register_error_handlers
-from api.routers import admin, commissions, disputes
+from api.routers import admin, disputes
 from api.servers import routes as servers
 from api.users import routes as users
 from shared.config import settings
