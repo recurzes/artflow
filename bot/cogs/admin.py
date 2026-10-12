@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.utils.api_client import APIError
 from bot.utils.embeds import base_embed, error_embed, success_embed
 from bot.utils.guild_setup import repair_staff_channels
 from bot.utils.permissions import is_admin
@@ -42,12 +42,11 @@ class AdminGroup(
             return
         bot = interaction.client
         try:
-            server = await bot.api.get(f"/servers/{interaction.guild.id}")
-            sid = server["id"]
-            st = await bot.api.get(f"/admin/stats?server_id={sid}")
-        except aiohttp.ClientResponseError as exc:
+            server = await bot.api.get_server(interaction.guild.id)
+            st = await bot.api.admin_stats(server["id"])
+        except APIError as exc:
             await interaction.followup.send(
-                embed=error_embed(f"API error: {str(exc.message)}"),
+                embed=error_embed(f"API error: {exc.detail}"),
                 ephemeral=True
             )
             return
@@ -72,12 +71,11 @@ class AdminGroup(
             return
         bot = interaction.client
         try:
-            server = await bot.api.get(f"/servers/{interaction.guild.id}")
-            sid = server["id"]
-            data = await bot.api.get(f"/admin/artists?server_id={sid}&limit=25&offset=0")
-        except aiohttp.ClientResponseError as exc:
+            server = await bot.api.get_server(interaction.guild.id)
+            data = await bot.api.admin_artists(server["id"])
+        except APIError as exc:
             await interaction.followup.send(
-                embed=error_embed(f"API error: {str(exc.message)}"),
+                embed=error_embed(f"API error: {exc.detail}"),
                 ephemeral=True
             )
             return
@@ -101,12 +99,11 @@ class AdminGroup(
             return
         bot = interaction.client
         try:
-            server = await bot.api.get(f"/servers/{interaction.guild.id}")
-            sid = server["id"]
-            data = await bot.api.get(f"/admin/commissions/summary?server_id={sid}")
-        except aiohttp.ClientResponseError as exc:
+            server = await bot.api.get_server(interaction.guild.id)
+            data = await bot.api.admin_commission_summary(server["id"])
+        except APIError as exc:
             await interaction.followup.send(
-                embed=error_embed(f"API error: {str(exc.message)}"),
+                embed=error_embed(f"API error: {exc.detail}"),
                 ephemeral=True
             )
             return

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 
-import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.utils.api_client import APIError
 from bot.utils.embeds import base_embed, error_embed, success_embed
 from shared.discord_layout import ROLE_18_VERIFIED
 
@@ -45,20 +45,14 @@ class AgeGateModal(discord.ui.Modal, title="18+ verification"):
             )
             return
 
-        created = member.created_at
-        body = {
-            "discord_user_id": str(member.id),
-            "discord_account_created_at": created.isoformat()
-        }
-
         try:
-            data = await self.bot.api.post(
-                "/users/verify-18/submit",
-                json=body
+            data = await self.bot.api.submit_age_verification(
+                member.id,
+                account_created_at=member.created_at.isoformat()
             )
-        except aiohttp.ClientResponseError as exc:
+        except APIError as exc:
             await interaction.followup.send(
-                embed=error_embed(f"Verification failed: {str(exc.message)}"),
+                embed=error_embed(f"Verification failed: {exc.detail}"),
                 ephemeral=True
             )
             return
@@ -165,13 +159,10 @@ class AgeVerificationCog(commands.Cog, name="Age verification"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            await self.bot.api.post(
-                "/users/verify-18/approve",
-                json={"discord_user_id": str(user.id)}
-            )
-        except aiohttp.ClientResponseError as exc:
+            await self.bot.api.approve_age_verification(user.id)
+        except APIError as exc:
             await interaction.followup.send(
-                embed=error_embed(f"API error: {str(exc.message)}"),
+                embed=error_embed(f"API error: {exc.detail}"),
                 ephemeral=True
             )
             return

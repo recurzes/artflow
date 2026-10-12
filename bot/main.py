@@ -2,7 +2,6 @@ import asyncio
 import logging
 import sys
 
-import aiohttp
 import discord
 import sentry_sdk
 from discord.ext import commands
@@ -64,9 +63,7 @@ class ArtflowBot(commands.AutoShardedBot):
             logger.info("Loaded cog: %s", cog)
 
     async def setup_hook(self) -> None:
-        session = aiohttp.ClientSession()
-        self.api = APIClient(session)
-        self._http_session = session
+        self.api = APIClient.from_settings()
 
         await self.load_cogs()
 
@@ -111,8 +108,8 @@ class ArtflowBot(commands.AutoShardedBot):
             await interaction.response.send_message(embed=error_embed(msg), ephemeral=True)
 
     async def close(self) -> None:
-        if hasattr(self, "_http_session") and not self._http_session.closed:
-            await self._http_session.close()
+        if hasattr(self, "api"):
+            await self.api.close()
         await super().close()
 
 

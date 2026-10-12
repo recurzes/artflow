@@ -3,11 +3,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.utils.api_client import APIError
 from bot.utils.audit_log import format_commission_snapshot, post_admin_log
 from bot.utils.embeds import base_embed, error_embed, success_embed
 from shared.discord_layout import ROLE_MODERATOR
@@ -83,17 +83,15 @@ class DisputeResolveView(discord.ui.View):
             return
         await interaction.response.defer()
         try:
-            await self.bot.api.patch(
-                f"/disputes/{self.dispute_id}/resolve",
-                json={
-                    "resolution": f"{label} (mod {interaction.user.id})",
-                    "set_commission_status": set_status,
-                    "resolved_by_discord_user_id": str(interaction.user.id)
-                }
+            await self.bot.api.resolve_dispute(
+                self.dispute_id,
+                resolved_by=interaction.user.id,
+                resolution=f"{label} (mod {interaction.user.id})",
+                outcome=set_status
             )
-        except aiohttp.ClientResponseError as exc:
+        except APIError as exc:
             await interaction.followup.send(
-                embed=error_embed(f"Resolve failed: {str(exc.message)}"),
+                embed=error_embed(f"Resolve failed: {exc.detail}"),
                 ephemeral=True
             )
             return
@@ -137,10 +135,10 @@ class DisputeCog(commands.Cog, name="Disputes"):
             )
             return
         try:
-            comm: dict[str, Any] = await self.bot.api.get(
-                f"/commissions/by-discord-channel/{interaction.channel.id}"
+            comm: dict[str, Any] = await self.bot.api.get_commission_for_channel(
+                interaction.channel.id
             )
-        except aiohttp.ClientResponseError:
+        except APIError:
             await interaction.followup.send(
                 embed=error_embed("No commission for this channel"),
                 ephemeral=True
@@ -148,17 +146,14 @@ class DisputeCog(commands.Cog, name="Disputes"):
             return
 
         try:
-            data = await self.bot.api.post(
-                "/disputes",
-                json={
-                    "commission_id": comm["id"],
-                    "raised_by_discord_user_id": str(interaction.user.id),
-                    "reason": reason
-                }
+            data = await self.bot.api.open_dispute(
+                comm["id"],
+                raised_by=interaction.user.id,
+                reason=reason
             )
-        except aiohttp.ClientResponseError as exc:
+        except APIError as exc:
             await interaction.followup.send(
-                embed=error_embed(f"Dispute failed: {str(exc.message)}"),
+                embed=error_embed(f"Dispute failed: {exc.detail}"),
                 ephemeral=True
             )
             return

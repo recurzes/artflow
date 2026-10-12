@@ -1,23 +1,17 @@
 import logging
 import uuid
-from typing import Any
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.utils.api_client import APIError
 from bot.utils.embeds import base_embed, error_embed, success_embed
 from shared.config import settings
 from shared.discord_layout import ROLE_UNVERIFIED, ROLE_VERIFIED_USER
 from shared.redis import get_redis
 
 logger = logging.getLogger(__name__)
-
-def _user_create_json(member: discord.Member) -> dict[str, Any]:
-    return {
-        "discord_user_id": str(member.id),
-        "discord_account_created_at": member.created_at.isoformat()
-    }
 
 TOS_TEXT = (
     "By using ArtFlow, you agree to:\n\n"
@@ -58,8 +52,11 @@ class TOSAcceptButton(discord.ui.View):
 
         try:
             bot = interaction.client
-            await bot.api.post("/users", json=_user_create_json(member))
-        except Exception as exc:
+            await bot.api.upsert_user(
+                member.id,
+                account_created_at=member.created_at.isoformat()
+            )
+        except APIError as exc:
             logger.error("Failed to upsert user %s: %s", member.id, exc)
             await interaction.followup.send(
                 embed=error_embed("Could not register your account. Please try again"),
