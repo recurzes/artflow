@@ -9,7 +9,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from api.routers import admin, artists, commissions, servers, users
+from api.routers import admin, artists, commissions, disputes, servers, users
 from shared.config import settings
 from shared.db import engine
 from shared.redis import close_pool, get_pool
@@ -54,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(artists.router)
     app.include_router(commissions.router)
+    app.include_router(disputes.router)
     app.include_router(servers.router)
     app.include_router(admin.router)
 

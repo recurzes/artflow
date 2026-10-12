@@ -684,5 +684,3 @@ def _build_application_embed(
 async def setup(bot: commands.Bot) -> None:
     cog = ArtistCog(bot)
     await bot.add_cog(cog)
-    bot.tree.add_command(cog.settings_group)
-    bot.tree.add_command(cog.commissions_group)

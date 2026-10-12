@@ -9,16 +9,14 @@ from typing import Any
 
 import aiohttp
 import discord
-from discord import app_commands, Interaction, interactions
-from discord._types import ClientT
+from discord import Interaction, app_commands
 from discord.ext import commands
 
 from bot.utils.embeds import base_embed, error_embed, success_embed, payment_instructions_embed, completed_work_embed, \
     warning_embed, public_review_embed
 from bot.utils.tickets import create_commission_ticket
-from exchange_rates import php_to_usd
-from shared.storage import upload_receipt
-from storage import upload_wip_image, upload_delivery_file
+from shared.exchange_rates import php_to_usd
+from shared.storage import upload_delivery_file, upload_receipt, upload_wip_image
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +214,7 @@ class CounterOfferModal(discord.ui.Modal, title="Counter offer"):
         self.bot = bot
         self.channel_id = channel_id
 
-    async def on_submit(self, interaction: Interaction[ClientT], /) -> None:
+    async def on_submit(self, interaction: Interaction, /) -> None:
         try:
             comm = await self.bot.api.get(
                 f"/commissions/by-discord-channel/{self.channel_id}"

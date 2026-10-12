@@ -54,18 +54,21 @@ class ArtflowBot(commands.AutoShardedBot):
             help_command=None
         )
         self.api: APIClient
+        # App command errors are routed through the tree, not dispatched as a bot event.
+        self.tree.on_error = self.on_app_command_error
+
+    async def load_cogs(self) -> None:
+        # A cog that fails to load means missing commands — refuse to start half-working.
+        for cog in COGS:
+            await self.load_extension(cog)
+            logger.info("Loaded cog: %s", cog)
 
     async def setup_hook(self) -> None:
         session = aiohttp.ClientSession()
         self.api = APIClient(session)
         self._http_session = session
 
-        for cog in COGS:
-            try:
-                await self.load_extension(cog)
-                logger.info("Loaded cog: %s", cog)
-            except Exception as exc:
-                logger.error("Failed to load cog %s: %s", cog, exc)
+        await self.load_cogs()
 
         await self.tree.sync()
         logger.info("Slash commands synced")
