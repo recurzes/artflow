@@ -2,83 +2,119 @@
 Shared pytest fixtures for the ArtFlow test suite.
 
 Strategy:
-- Uses an in-memory SQLite database (via aiosqlite) so tests run without a
-  real PostgreSQL instance.  Alembic is *not* used here — we let SQLAlchemy
-  create the schema directly from the ORM models.
-- SQLite doesn't support JSONB, so we patch the dialect's type compiler to
-  fall back to generic JSON before creating the schema.
+- Tests run against a real PostgreSQL server, because the models use ARRAY,
+  JSONB and array operators. Start one with `docker compose up -d postgres`.
+- The suite drops and recreates its own database (name must end in `_test`)
+  and builds the schema with Alembic, so the migrations are exercised too.
+- Every test runs inside a transaction that is rolled back afterwards.
 - Redis is mocked via AsyncMock so no running Redis is needed.
-- The FastAPI TestClient is async (httpx.AsyncClient via ASGITransport).
 """
+import asyncio
+import os
+import subprocess
+import sys
 import uuid
 from collections.abc import AsyncGenerator
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from unittest.mock import AsyncMock
 
-import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.types import JSON
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://artflow:artflow@localhost:5434/artflow_test",
+)
+# Must be set before anything imports shared.config / shared.db.
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+os.environ.setdefault("BOT_SECRET", "test-secret")
+os.environ["ENVIRONMENT"] = "test"
 
-from api.dependencies import get_db, get_redis_client, verify_bot_secret
-from api.main import app
-from shared.models.user import User
+import asyncpg  # noqa: E402
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy.engine import make_url  # noqa: E402
+from sqlalchemy.ext.asyncio import (  # noqa: E402
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.pool import NullPool  # noqa: E402
 
-# ---------------------------------------------------------------------------
-# SQLite shims for PostgreSQL-only types
-# ---------------------------------------------------------------------------
-if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
-    SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: self.visit_JSON(JSON(), **kw)
+from api.dependencies import get_db, get_redis_client  # noqa: E402
+from api.main import app  # noqa: E402
+from shared.config import settings  # noqa: E402
 
-if not hasattr(SQLiteTypeCompiler, "visit_ARRAY"):
-    SQLiteTypeCompiler.visit_ARRAY = lambda self, type_, **kw: "TEXT"
+ROOT = Path(__file__).resolve().parent.parent
 
-# ---------------------------------------------------------------------------
-# In-memory async SQLite engine (session-scoped for speed)
-# ---------------------------------------------------------------------------
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
-# Only create tables needed for current test modules.  Add more as you write
-# tests for other routers.
-_TEST_TABLES = [User.__table__]
+async def _recreate_database(url: str) -> None:
+    parsed = make_url(url)
+    if not (parsed.database or "").endswith("_test"):
+        raise RuntimeError(
+            f"Refusing to recreate database {parsed.database!r}: "
+            "TEST_DATABASE_URL must point at a database whose name ends in '_test'"
+        )
+    conn = await asyncpg.connect(
+        user=parsed.username,
+        password=parsed.password,
+        host=parsed.host,
+        port=parsed.port,
+        database="postgres",
+    )
+    try:
+        await conn.execute(f'DROP DATABASE IF EXISTS "{parsed.database}" WITH (FORCE)')
+        await conn.execute(f'CREATE DATABASE "{parsed.database}"')
+    finally:
+        await conn.close()
+
+
+@pytest.fixture(scope="session")
+def _schema() -> None:
+    """Fresh test database, migrated to head with Alembic."""
+    # Own thread: pytest-asyncio owns the event loop of the main thread.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(asyncio.run, _recreate_database(TEST_DATABASE_URL)).result()
+    subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=ROOT,
+        env=os.environ.copy(),
+        check=True,
+        capture_output=True,
+    )
 
 
 @pytest_asyncio.fixture(scope="session")
-async def engine():
-    """Create one in-memory DB per test session."""
-    _engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-    async with _engine.begin() as conn:
-        for table in _TEST_TABLES:
-            await conn.run_sync(table.create, checkfirst=True)
+async def engine(_schema):
+    _engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
     yield _engine
     await _engine.dispose()
 
 
-# ---------------------------------------------------------------------------
-# Session factory exposed to fixtures
-# ---------------------------------------------------------------------------
 @pytest_asyncio.fixture
-async def test_session_factory(engine):
-    """Return a session factory bound to the test engine."""
-    return async_sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
+async def session_factory(engine) -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
+    """Sessions bound to one connection whose outer transaction is rolled back."""
+    async with engine.connect() as connection:
+        transaction = await connection.begin()
+        yield async_sessionmaker(
+            bind=connection,
+            expire_on_commit=False,
+            autoflush=False,
+            join_transaction_mode="create_savepoint",
+        )
+        await transaction.rollback()
 
 
-# ---------------------------------------------------------------------------
-# FastAPI async test client
-# ---------------------------------------------------------------------------
 @pytest_asyncio.fixture
-async def client(test_session_factory, mock_redis) -> AsyncGenerator[AsyncClient, None]:
-    """
-    Override FastAPI dependencies to use the in-memory DB and mock Redis.
-    Also bypass bot-secret authentication so tests don't need to set headers.
+async def db(session_factory) -> AsyncGenerator[AsyncSession, None]:
+    """A session for arranging data or calling services directly."""
+    async with session_factory() as session:
+        yield session
 
-    The get_db override mirrors the real shared/db.py behaviour (commit on
-    success, rollback on exception) so that multiple HTTP calls within the
-    same test can see each other's committed rows.
-    """
+
+def _override_dependencies(session_factory, mock_redis) -> None:
     async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
-        async with test_session_factory() as session:
+        # Mirrors shared/db.py: commit on success, rollback on exception.
+        async with session_factory() as session:
             try:
                 yield session
                 await session.commit()
@@ -88,19 +124,30 @@ async def client(test_session_factory, mock_redis) -> AsyncGenerator[AsyncClient
 
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_redis_client] = lambda: mock_redis
-    app.dependency_overrides[verify_bot_secret] = lambda: None  # skip auth
 
+
+@pytest_asyncio.fixture
+async def client(session_factory, mock_redis) -> AsyncGenerator[AsyncClient, None]:
+    """HTTP client authenticated as the bot."""
+    _override_dependencies(session_factory, mock_redis)
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"X-Bot-Secret": settings.bot_secret},
     ) as ac:
         yield ac
-
     app.dependency_overrides.clear()
 
 
-# ---------------------------------------------------------------------------
-# Mocked Redis
-# ---------------------------------------------------------------------------
+@pytest_asyncio.fixture
+async def anon_client(session_factory, mock_redis) -> AsyncGenerator[AsyncClient, None]:
+    """HTTP client that sends no bot secret."""
+    _override_dependencies(session_factory, mock_redis)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+    app.dependency_overrides.clear()
+
+
 @pytest.fixture
 def mock_redis():
     """Return a simple AsyncMock that mimics the redis.asyncio.Redis interface."""
@@ -112,9 +159,6 @@ def mock_redis():
     return redis
 
 
-# ---------------------------------------------------------------------------
-# Helper factories
-# ---------------------------------------------------------------------------
 def make_discord_id() -> str:
     """Generate a unique fake Discord snowflake-style ID."""
     return str(uuid.uuid4().int)[:18]
