@@ -1,161 +1,138 @@
 # ArtFlow
 
-Discord-native art commission management platform built for Filipino artists and B2B art communities.
+A Discord bot that runs art commissions inside a server, built for Filipino artists and art communities.
 
-Artists accept commissions, post WIPs, and get paid — entirely inside Discord. Server owners get a white-label commission system with a 9-stage lifecycle, dispute resolution, role management, and subscription tiers.
+A client picks an artist with `/commission` and gets a private ticket channel. The commission then moves through brief, quote, terms, payment, work-in-progress updates, delivery and review, with the bot keeping both sides on the same step and a record of every one.
 
 ---
 
-## What It Does
+## What it does
 
-- **Artist onboarding** — `/artist-apply` modal → admin approve/reject queue → auto-role assignment
-- **Commission lifecycle** — 9 stages: `INQUIRY → INTAKE → QUOTED → TOS_PENDING → PAYMENT_PENDING → IN_PROGRESS → DELIVERED → COMPLETED → CANCELLED`
-- **Payment handling** — GCash and PayPal receipts uploaded as screenshots; 24-hour payment deadline enforced by Celery Beat
-- **WIP system** — artists post progress images that are auto-watermarked via Celery + Pillow before being shown to clients
-- **Delivery + reviews** — 48-hour auto-accept timer; star ratings posted to `#reviews`
-- **Dispute resolution** — `/dispute` freezes a ticket; mod panel with Full Refund / Partial Refund / resolution options
-- **18+ age gating** — phone-verified Discord accounts auto-approved; others queued for mod review
-- **B2B tiers** — FREE / STARTER / PRO / ENTERPRISE enforced per server; LemonSqueezy billing with webhook handler
-- **Admin commands** — live stats, artist roster, commission pipeline overview
+| Area | What works |
+|---|---|
+| **Member verification** | Members accept the server terms with a button and get the Verified User role. |
+| **Artist onboarding** | `/artist-apply` → moderators Approve / Reject in the verification queue → role, directory post and welcome DM. A rejected applicant can reapply after 7 days. |
+| **Commissions** | The lifecycle below, enforced by the API. Each artist has a limit on active commissions. |
+| **Payments** | The client pays the artist directly (GCash / PayPal) and uploads the receipt with `/pay`; the artist confirms. ArtFlow records, it does not move money. |
+| **Timers** | Unpaid commissions are cancelled 24 hours after the terms are accepted (with a reminder in the last 12). Deliveries are auto-accepted after 48 hours. |
+| **Disputes** | `/dispute` freezes a commission until a moderator rules: cancel it or mark it completed. |
+| **Reviews** | 1–5 stars after completion, posted to `#reviews`; the artist's rating is the average. |
+| **18+ gating** | Accounts 90+ days old are approved on request; newer ones go to moderators. NSFW commissions need an 18+ client and an artist who opted in. |
+| **Admin** | `/admin stats`, `artists`, `commissions`, `repair-permissions`. |
+
+**Not built yet:** billing and subscription tiers (the `subscription_tier` column exists and is always `FREE`), WIP watermarking, revision tracking (`/revision` only explains this), and a `/setup` command (a server is provisioned when the bot joins it).
+
+### Commission lifecycle
+
+```
+INQUIRY ─► INTAKE ─► QUOTED ─► TOS_PENDING ─► PAYMENT_PENDING ─► IN_PROGRESS ─► WIP ─► DELIVERED ─► COMPLETED
+              ▲          │
+              └──────────┘  counter-offer
+```
+
+- **CANCELLED** is reachable from any step until a payment receipt is uploaded (`/cancel`, or the payment deadline passing with no receipt).
+- **DISPUTED** is reachable once a receipt is uploaded and until completion. Only a moderator moves it on, to COMPLETED or CANCELLED.
+- A commission is cancelled automatically only when no receipt was uploaded. A receipt the artist has not confirmed is a dispute, not a lapse.
+
+Every transition goes through one function in [`api/commissions/service.py`](api/commissions/service.py); a move that is not in its table cannot happen.
+
+### Commands
+
+| Who | Commands |
+|---|---|
+| Client | `/commission`, `/accept-quote`, `/confirm-tos`, `/pay`, `/complete`, `/review` |
+| Artist | `/artist-apply`, `/quote`, `/confirm-payment`, `/wip`, `/deliver`, `/showcase`, `/settings tos`, `/settings nsfw`, `/commissions open`, `/commissions close` |
+| Either party | `/cancel`, `/dispute` |
+| Moderator | `/dispute-resolve`, `/age-approve`, `/age-gate-post`, Approve / Reject buttons |
+| Admin | `/setup-tos`, `/admin …` |
+
+Most steps also have a button under the relevant message. Buttons keep working after the bot restarts.
 
 ---
 
 ## Architecture
 
-Four runtimes, one Python codebase:
+Two processes do the work, plus an optional third:
 
 ```
-Discord (WebSocket)
-    └── bot/          discord.py — slash commands, cogs, events
-            │ HTTP (X-Bot-Secret)
-            ▼
-         api/          FastAPI — business logic, DB access
-            │
-            ├── shared/models/    SQLAlchemy async ORM → PostgreSQL
-            ├── shared/schemas/   Pydantic v2 contracts (all layers)
-            └── shared/redis.py   Redis connection pool
+Discord ◄──► bot/      discord.py: slash commands, buttons, the timers' announcements
+               │  HTTP, X-Bot-Secret + X-Actor-Discord-Id
+               ▼
+             api/      FastAPI: every rule and all data access
+               │
+               ├── PostgreSQL        (SQLAlchemy async, Alembic)
+               ├── Redis             (pending 18+ requests)
+               └── Supabase Storage  (receipts, WIP images, deliveries)
 
-    workers/           Celery — notifications, image processing, timers
-            └── shared/           same models, same DB session
+             workers/  Celery: reserved for image work; nothing is queued yet
 ```
 
-**Build order:** `shared/models` → Alembic migrations → `shared/schemas` → `api/` → `bot/` → `workers/`
+**The bot holds no credentials except its Discord token and the shared secret.** It never touches the database, Redis or storage; it sends files and requests to the API.
 
-The bot never touches the database directly. It calls the API over HTTP. Workers are queued by the API, not the bot.
+**The API decides, the bot reports.** Each action names the member who triggered it (`X-Actor-Discord-Id`), and the API checks that this member is the client or the artist the action belongs to. The bot has no copy of those rules. The one thing the API cannot know is Discord roles, so the bot states when the actor is a moderator.
+
+**Timers run in the bot.** Every five minutes it asks the API which commissions are overdue or due for a reminder; the API changes them and returns them, and the bot posts in each ticket. A worker could change the records but could not tell anyone.
+
+### Code layout
+
+Both `api/` and `bot/` are grouped by feature.
+
+```
+api/
+├── main.py, dependencies.py, errors.py
+└── <feature>/               users, artists, commissions, reviews, disputes, servers, admin
+    ├── routes.py            parse the request, call the service, return the result
+    ├── service.py           the rules; raises NotFound / Forbidden / Conflict / InvalidState
+    ├── repository.py        named queries; the only place that builds SQL
+    └── schemas.py           request and response shapes
+
+bot/
+├── main.py
+├── commissions/             cog.py (commands), opening.py, payment.py, completion.py,
+│                            tickets.py, sweeps.py (timers), formatting.py
+├── artists/                 cog.py, applications.py
+├── disputes/, verification/, admin/, servers/
+└── shared/                  api_client.py, layout.py, embeds.py, permissions.py, ...
+
+shared/                      used by more than one process:
+                             config, db, redis, storage, models/, errors, discord_layout
+workers/                     Celery app and the watermark placeholder
+alembic/                     migrations
+tests/                       api/ (against Postgres), bot/ (fake Discord objects)
+```
+
+The layering is enforced by [`tests/test_architecture.py`](tests/test_architecture.py): routes and services may not build queries, a feature may not import another feature's repository, and the bot may not import the API or any infrastructure.
 
 ---
 
-## Stack
-
-| Layer | Technology |
-|---|---|
-| Language | Python 3.12 |
-| Bot | discord.py 2.3 + aiohttp |
-| API | FastAPI + uvicorn + gunicorn |
-| ORM | SQLAlchemy 2.0 (async) + asyncpg |
-| Migrations | Alembic (autogenerate only) |
-| Validation | Pydantic v2 |
-| Cache / Queue | Redis |
-| Workers | Celery + Celery Beat |
-| Image processing | Pillow |
-| File storage | Supabase Storage |
-| Database | PostgreSQL (self-hosted Supabase) |
-| Package manager | uv |
-| Billing | LemonSqueezy |
-| Deploy | Dokploy on Oracle Cloud VPS |
-| CI/CD | GitHub Actions → Docker Hub → Dokploy webhook |
-
----
-
-## Project Structure
-
-```
-artflow/
-├── bot/
-│   ├── cogs/
-│   │   ├── verification.py     # TOS button, email flow, role assignment
-│   │   ├── artist.py           # /artist-apply, /showcase, /commissions open/close
-│   │   ├── commission.py       # /commission request, /quote, /pay, /wip, /deliver
-│   │   ├── dispute.py          # /dispute command + mod resolution
-│   │   └── admin.py            # /admin stats, artists, commissions
-│   ├── events/
-│   │   └── on_member_join.py   # Unverified role + welcome DM
-│   ├── utils/
-│   │   ├── embeds.py           # Reusable embed builders
-│   │   └── api_client.py       # aiohttp wrapper — injects X-Bot-Secret on every call
-│   └── main.py                 # AutoShardedBot, cog loader, error handler
-│
-├── api/
-│   ├── routers/                # users, artists, commissions, servers, admin
-│   ├── services/               # Business logic — user_service, artist_service, commission_service
-│   ├── dependencies.py         # get_db(), verify_bot_secret(), rate limiting
-│   └── main.py                 # FastAPI app factory + lifespan
-│
-├── workers/
-│   ├── notifications.py        # DM reminders, deadline alerts
-│   ├── images.py               # Pillow watermarking, thumbnail generation
-│   ├── celery_app.py           # Celery app factory (Redis broker)
-│   └── beat.py                 # Celery Beat schedule
-│
-├── shared/
-│   ├── models/                 # 7 SQLAlchemy models — server, user, artist, commission, wip_update, review, dispute
-│   ├── schemas/                # Pydantic v2 request/response shapes
-│   ├── db.py                   # Async session factory
-│   ├── redis.py                # Redis connection pool
-│   ├── storage.py              # Supabase Storage client wrapper
-│   └── config.py               # pydantic-settings — reads from .env
-│
-├── alembic/                    # Auto-generated migration scripts
-├── docker-compose.yml          # Local dev: postgres + redis (+ full app profile)
-├── Dockerfile                  # Single image; CMD overridden per service
-└── pyproject.toml              # uv — one dependency file for the entire monorepo
-```
-
----
-
-## Local Development
+## Local development
 
 ### Prerequisites
 
-- [uv](https://docs.astral.sh/uv/) — Python package manager
-- [Docker](https://docs.docker.com/get-docker/) + Docker Compose
+- [uv](https://docs.astral.sh/uv/)
+- Docker
 
 ### Setup
 
 ```bash
-git clone https://github.com/your-org/artflow.git
-cd artflow
-
 cp .env.example .env
-# Edit .env — set DISCORD_TOKEN, BOT_SECRET, and Supabase credentials at minimum
+# Set DISCORD_TOKEN and BOT_SECRET. Supabase is only needed for file uploads.
 
-uv sync
-
+uv sync --extra dev
 docker compose up -d postgres redis
-
 uv run alembic upgrade head
 
-# Terminal 1 — API
-uv run uvicorn api.main:app --reload
-
-# Terminal 2 — Bot
-uv run python -m bot.main
-
-# Terminal 3 — Celery worker (optional for local dev)
-uv run celery -A workers.celery_app worker --loglevel=info
+uv run uvicorn api.main:app --reload      # terminal 1: API on :8000, docs at /docs
+uv run python -m bot.main                 # terminal 2: bot
 ```
 
-API docs available at `http://localhost:8000/docs` once the API is running.
-
-### Full stack with Docker
+Or everything in containers:
 
 ```bash
 docker compose --profile app up --build
 ```
 
-### Tests
-
-Tests need the Postgres container; they create and use their own `artflow_test` database.
+### Tests and lint
 
 ```bash
 docker compose up -d postgres
@@ -163,74 +140,55 @@ uv run --extra dev pytest
 uv run --extra dev ruff check .
 ```
 
-### Database migrations
+The suite creates and uses its own `artflow_test` database, builds the schema with Alembic, and rolls every test back. API tests walk the full lifecycle over HTTP; bot tests drive the handlers with fake Discord objects and call every method of the bot's API client against the real API.
+
+### Migrations
 
 ```bash
-# After editing shared/models/
-uv run alembic revision --autogenerate -m "describe_change"
+uv run alembic revision --autogenerate -m "describe the change"
 uv run alembic upgrade head
-
-# Roll back one migration
-uv run alembic downgrade -1
 ```
 
----
-
-## Environment Variables
-
-See `.env.example` for the full reference. Required variables:
-
-| Variable | Description |
-|---|---|
-| `DISCORD_TOKEN` | Bot token from Discord Developer Portal |
-| `BOT_SECRET` | Shared secret between bot and API — `openssl rand -hex 32` |
-| `DATABASE_URL` | `postgresql+asyncpg://user:pass@host:port/db` |
-| `REDIS_URL` | `redis://localhost:6379/0` |
-| `SUPABASE_URL` | Supabase instance URL (for Storage) |
-| `SUPABASE_SERVICE_KEY` | `service_role` JWT |
-| `API_BASE_URL` | Used to build email verification links in DMs |
+Revisions that have run anywhere are not edited; add a new one.
 
 ---
 
-## Services
+## Configuration
 
-| Service | Port | Command |
+See [`.env.example`](.env.example) for every variable.
+
+| Variable | Needed by | Purpose |
 |---|---|---|
-| FastAPI | 8000 | `uvicorn api.main:app --reload` |
-| Discord Bot | — | `python -m bot.main` |
-| Celery Worker | — | `celery -A workers.celery_app worker` |
-| Celery Beat | — | `celery -A workers.celery_app beat` |
-| PostgreSQL | 5434 (local) | Docker |
-| Redis | 6379 | Docker |
+| `DISCORD_TOKEN` | bot | Bot token |
+| `BOT_SECRET` | bot, api | Shared secret; generate with `openssl rand -hex 32` |
+| `API_BASE_URL` | bot | Where the bot reaches the API |
+| `DATABASE_URL` | api | `postgresql+asyncpg://user:pass@host:port/db` |
+| `REDIS_URL` | api, worker | |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | api | File storage; the API creates its two private buckets on startup |
+| `ENVIRONMENT` | all | `production` hides the API docs and rejects the example secrets |
+| `EXCHANGE_RATE_ACCESS_KEY` | api | Optional; adds an approximate USD figure to quotes |
+| `SENTRY_DSN` | all | Optional |
+
+The API and the bot refuse to start when a variable they need is missing.
 
 ---
 
 ## Deployment
 
-Deployed on Oracle Cloud VPS via [Dokploy](https://dokploy.com). GitHub Actions builds and pushes Docker images on every push to `main`, then triggers Dokploy deploy webhooks for each service.
+GitHub Actions runs lint and tests on pull requests and on pushes to `main`. On `main`, when they pass, it builds one Docker image, pushes it to Docker Hub and triggers the Dokploy deployments. The image's command is overridden per service:
 
-The image does not run migrations on start. Run `alembic upgrade head` against the
-production database before the new API container takes traffic.
-
-Required GitHub Actions secrets:
-
-| Secret | Value |
+| Service | Command |
 |---|---|
-| `DOCKER_USERNAME` | Docker Hub username |
-| `DOCKER_TOKEN` | Docker Hub access token |
-| `DOKPLOY_TOKEN` | Dokploy API token |
-| `DOKPLOY_WEBHOOK_URL_API` | Deploy webhook for API service |
-| `DOKPLOY_WEBHOOK_URL_BOT` | Deploy webhook for Bot service |
-| `DOKPLOY_WEBHOOK_URL_WORKERS` | Deploy webhook for Workers service |
+| API | `uvicorn api.main:app --host 0.0.0.0 --port 8000` |
+| Bot | `python -m bot.main` |
+| Worker (optional) | `celery -A workers.celery_app worker` |
 
----
+**Migrations are not run automatically.** Run `alembic upgrade head` against the production database before the new API takes traffic.
 
-## Roadmap
+Required GitHub Actions secrets: `DOCKER_USERNAME`, `DOCKER_TOKEN`, `DOKPLOY_TOKEN`, `DOKPLOY_WEBHOOK_URL_API`, `DOKPLOY_WEBHOOK_URL_BOT`, `DOKPLOY_WEBHOOK_URL_WORKERS`.
 
-| Month | Goal |
-|---|---|
-| Month 1 (Weeks 1–4) | Flagship server live. Verification + artist apply flow end-to-end. 5 test artists onboarded. |
-| Month 2 (Weeks 5–8) | Full 9-stage commission lifecycle. GCash payments. WIP watermarking. Reviews. 50 real artists. |
-| Month 3 (Weeks 9–13) | NSFW + age gating. Dispute system. B2B `/setup` wizard + tier enforcement. 3 pilot servers. First paying B2B customer. |
+### Bot permissions
 
-See [`artflow-roadmap.md`](artflow-roadmap.md) for the full week-by-week breakdown.
+The bot needs the **Server Members** privileged intent and, in each server, Manage Roles, Manage Channels, Send Messages, Embed Links and Attach Files. Its role must sit above the roles it assigns.
+
+When it joins a server it creates its roles, channels and categories and records their IDs, so they can be renamed afterwards. On a server set up before staff channels were hidden from `@everyone`, run `/admin repair-permissions` once.
