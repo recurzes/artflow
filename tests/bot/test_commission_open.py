@@ -109,7 +109,7 @@ class TestOpenCommissionTicket:
 
         await self._open(interaction)
 
-        api.cancel.assert_awaited_once_with("commission-uuid")
+        api.cancel.assert_awaited_once_with("commission-uuid", actor=1001)
         api.open_ticket.assert_not_awaited()
         assert "could not create the ticket channel" in reply_text(interaction)
 
@@ -119,7 +119,7 @@ class TestOpenCommissionTicket:
 
         await self._open(interaction)
 
-        api.cancel.assert_awaited_once_with("commission-uuid")
+        api.cancel.assert_awaited_once_with("commission-uuid", actor=1001)
         channel.delete.assert_awaited_once()
         assert "temporarily unavailable" in reply_text(interaction)
 

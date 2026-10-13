@@ -106,8 +106,8 @@ async def accept_quote_flow(interaction: discord.Interaction) -> None:
     """
     api = interaction.client.api
     try:
-        comm = await ticket_commission(interaction, only="client", action="accept the quote")
-        await api.accept_quote(comm["id"])
+        comm = await ticket_commission(interaction)
+        await api.accept_quote(comm["id"], actor=interaction.user.id)
         artist = await api.get_artist(comm["artist_id"])
     except TicketError as exc:
         await reply_error(interaction, str(exc))
@@ -174,7 +174,7 @@ class TosAcceptButton(
         await interaction.response.defer(ephemeral=True)
         api = interaction.client.api
         try:
-            comm = await ticket_commission(interaction, only="client", action="accept the terms")
+            comm = await ticket_commission(interaction)
             artist = await api.get_artist(comm["artist_id"])
             current = artist.get("tos_hash") or ""
             if not current.startswith(self.version):
@@ -186,7 +186,7 @@ class TosAcceptButton(
                     "Read the current version and accept that one"
                 )
                 return
-            comm = await api.accept_tos(comm["id"], current)
+            comm = await api.accept_tos(comm["id"], current, actor=interaction.user.id)
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -308,7 +308,7 @@ async def submit_review(
     """Save the client's review and publish it. Shared by the modal and `/review`."""
     api = interaction.client.api
     try:
-        await api.review(comm["id"], reviewer_id=comm["client_id"], rating=rating, body=body)
+        await api.review(comm["id"], actor=interaction.user.id, rating=rating, body=body)
     except APIError as exc:
         await reply_error(interaction, exc.detail)
         return
@@ -359,7 +359,11 @@ class IntakeModal(discord.ui.Modal, title="Commission intake"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         notes = f"{self.brief.value}\n\nReferences:\n{self.refs.value or '—'}"
         try:
-            await interaction.client.api.submit_intake(self.commission_id, notes)
+            await interaction.client.api.submit_intake(
+                self.commission_id,
+                notes,
+                actor=interaction.user.id
+            )
         except APIError as exc:
             await reply_error(interaction, exc.detail)
             return
@@ -396,7 +400,7 @@ class IntakeOpenView(discord.ui.View):
             button: discord.ui.Button
     ) -> None:
         try:
-            comm = await ticket_commission(interaction, only="client", action="submit the brief")
+            comm = await ticket_commission(interaction)
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -417,7 +421,11 @@ class CounterOfferModal(discord.ui.Modal, title="Counter offer"):
 
     async def on_submit(self, interaction: Interaction, /) -> None:
         try:
-            await interaction.client.api.counter_offer(self.commission["id"], self.notes.value)
+            await interaction.client.api.counter_offer(
+                self.commission["id"],
+                self.notes.value,
+                actor=interaction.user.id
+            )
         except APIError as exc:
             await reply_error(interaction, exc.detail)
             return
@@ -483,7 +491,7 @@ class ReviewPromptView(discord.ui.View):
             button: discord.ui.Button
     ) -> None:
         try:
-            comm = await ticket_commission(interaction, only="client", action="leave a review")
+            comm = await ticket_commission(interaction)
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -527,7 +535,7 @@ class QuoteActionsView(discord.ui.View):
             button: discord.ui.Button
     ) -> None:
         try:
-            comm = await ticket_commission(interaction, only="client", action="counter the quote")
+            comm = await ticket_commission(interaction)
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -674,7 +682,7 @@ async def open_commission_ticket(
         await api.open_ticket(comm["id"], channel.id)
     except (APIError, discord.HTTPException, RuntimeError) as exc:
         logger.exception("Could not open a ticket for commission %s", comm["id"])
-        await _undo_ticket(api, comm["id"], channel)
+        await _undo_ticket(api, comm["id"], channel, actor=client_member.id)
         await reply_error(
             interaction,
             exc.detail if isinstance(exc, APIError) else (
@@ -708,11 +716,13 @@ async def open_commission_ticket(
 async def _undo_ticket(
         api: Any,
         commission_id: str,
-        channel: discord.TextChannel | None
+        channel: discord.TextChannel | None,
+        *,
+        actor: int
 ) -> None:
     """Roll back a half-opened commission so it does not hold one of the artist's slots."""
     try:
-        await api.cancel(commission_id)
+        await api.cancel(commission_id, actor=actor)
     except APIError:
         logger.exception("Could not cancel half-opened commission %s", commission_id)
     if channel is not None:
@@ -802,8 +812,12 @@ class CommissionCog(commands.Cog, name="Commissions"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            comm = await ticket_commission(interaction, only="artist", action="send a quote")
-            quoted = await self.bot.api.quote(comm["id"], price_php=f"{amount:.2f}")
+            comm = await ticket_commission(interaction)
+            quoted = await self.bot.api.quote(
+                comm["id"],
+                actor=interaction.user.id,
+                price_php=f"{amount:.2f}"
+            )
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -842,7 +856,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
     async def confirm_tos(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            comm = await ticket_commission(interaction, only="client", action="accept the terms")
+            comm = await ticket_commission(interaction)
             artist = await self.bot.api.get_artist(comm["artist_id"])
         except TicketError as exc:
             await reply_error(interaction, str(exc))
@@ -883,7 +897,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            comm = await ticket_commission(interaction, only="client", action="upload the receipt")
+            comm = await ticket_commission(interaction)
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -910,6 +924,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
             raw = await receipt.read()
             await self.bot.api.upload_receipt(
                 comm["id"],
+                actor=interaction.user.id,
                 filename=receipt.filename,
                 content=raw,
                 content_type=receipt.content_type
@@ -941,8 +956,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
     async def confirm_payment_cmd(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            comm = await ticket_commission(interaction, only="artist", action="confirm payment")
-            await self.bot.api.confirm_payment(comm["id"])
+            comm = await ticket_commission(interaction)
+            await self.bot.api.confirm_payment(comm["id"], actor=interaction.user.id)
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -972,7 +987,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            comm = await ticket_commission(interaction, only="artist", action="post a WIP update")
+            comm = await ticket_commission(interaction)
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -993,6 +1008,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
             raw = await image.read()
             await self.bot.api.post_wip(
                 comm["id"],
+                actor=interaction.user.id,
                 filename=image.filename,
                 content=raw,
                 content_type=image.content_type,
@@ -1025,7 +1041,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            comm = await ticket_commission(interaction, only="artist", action="deliver")
+            comm = await ticket_commission(interaction)
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -1052,6 +1068,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
             raw = await file.read()
             delivered = await self.bot.api.deliver(
                 comm["id"],
+                actor=interaction.user.id,
                 filename=file.filename,
                 content=raw,
                 content_type=file.content_type
@@ -1082,8 +1099,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
     async def complete_cmd(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            comm = await ticket_commission(interaction, only="client", action="accept the delivery")
-            completed = await self.bot.api.complete(comm["id"])
+            comm = await ticket_commission(interaction)
+            completed = await self.bot.api.complete(comm["id"], actor=interaction.user.id)
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -1107,7 +1124,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         try:
-            comm = await ticket_commission(interaction, only="client", action="leave a review")
+            comm = await ticket_commission(interaction)
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -1126,10 +1143,11 @@ class CommissionCog(commands.Cog, name="Commissions"):
         await interaction.response.defer(ephemeral=True)
         try:
             comm = await ticket_commission(interaction)
-            parties = (comm["client_discord_user_id"], comm["artist_discord_user_id"])
-            if str(interaction.user.id) not in parties and not is_staff(interaction.user):
-                raise TicketError("Only the client, the artist or a moderator can cancel")
-            await self.bot.api.cancel(comm["id"])
+            await self.bot.api.cancel(
+                comm["id"],
+                actor=interaction.user.id,
+                as_staff=is_staff(interaction.user)
+            )
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return

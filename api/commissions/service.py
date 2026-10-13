@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,6 +81,24 @@ def _require_status(comm: Commission, *allowed: CommissionStatus, action: str) -
         f"{action} is only possible while the commission is {expected} "
         f"(it is {_label(comm.status)})"
     )
+
+
+def _require_party(
+        comm: Commission,
+        actor: str,
+        role: Literal["client", "artist"],
+        action: str
+) -> None:
+    """Refuse unless `actor` (a Discord user ID) is that party of the commission.
+
+    The bot passes along who pressed the button; the rule about who may do
+    what lives here, not in the bot.
+    """
+    expected = (
+        comm.client_discord_user_id if role == "client" else comm.artist_discord_user_id
+    )
+    if actor != expected:
+        raise Forbidden(f"Only the {role} can {action}")
 
 
 def mark_completed(comm: Commission) -> None:
@@ -216,9 +235,11 @@ async def open_ticket(
 async def submit_intake(
         db: AsyncSession,
         commission_id: uuid.UUID,
+        actor: str,
         notes: str
 ) -> Commission:
     comm = await get_commission_for_update(db, commission_id)
+    _require_party(comm, actor, "client", "submit the brief")
     _require_status(comm, CommissionStatus.INTAKE, action="Submitting the brief")
     comm.client_intake_notes = notes
     await db.flush()
@@ -228,6 +249,7 @@ async def submit_intake(
 async def apply_quote(
         db: AsyncSession,
         commission_id: uuid.UUID,
+        actor: str,
         quote: QuoteCreate
 ) -> Commission:
     # Looked up before the row is locked: it may be a network call.
@@ -236,6 +258,7 @@ async def apply_quote(
         price_usd = await exchange_rates.php_to_usd(quote.quoted_price_php)
 
     comm = await get_commission_for_update(db, commission_id)
+    _require_party(comm, actor, "artist", "send a quote")
     _require_status(comm, CommissionStatus.INTAKE, action="Quoting")
 
     comm.quoted_price_php = float(quote.quoted_price_php)
@@ -253,10 +276,12 @@ async def apply_quote(
 async def request_counter_offer(
         db: AsyncSession,
         commission_id: uuid.UUID,
+        actor: str,
         notes: str = ""
 ) -> Commission:
     """The client declines the quote and asks for a new one."""
     comm = await get_commission_for_update(db, commission_id)
+    _require_party(comm, actor, "client", "counter the quote")
     _require_status(comm, CommissionStatus.QUOTED, action="A counter-offer")
 
     if notes.strip():
@@ -270,8 +295,9 @@ async def request_counter_offer(
     return comm
 
 
-async def accept_quote(db: AsyncSession, commission_id: uuid.UUID) -> Commission:
+async def accept_quote(db: AsyncSession, commission_id: uuid.UUID, actor: str) -> Commission:
     comm = await get_commission_for_update(db, commission_id)
+    _require_party(comm, actor, "client", "accept the quote")
     _require_status(comm, CommissionStatus.QUOTED, action="Accepting the quote")
     _transition(comm, CommissionStatus.TOS_PENDING)
     await db.flush()
@@ -281,9 +307,11 @@ async def accept_quote(db: AsyncSession, commission_id: uuid.UUID) -> Commission
 async def confirm_tos_acceptance(
         db: AsyncSession,
         commission_id: uuid.UUID,
+        actor: str,
         tos_version_hash: str
 ) -> Commission:
     comm = await get_commission_for_update(db, commission_id)
+    _require_party(comm, actor, "client", "accept the terms")
     _require_status(comm, CommissionStatus.TOS_PENDING, action="Accepting the terms")
 
     artist = await artist_service.get_artist(db, comm.artist_id)
@@ -308,10 +336,12 @@ async def confirm_tos_acceptance(
 async def upload_receipt(
         db: AsyncSession,
         commission_id: uuid.UUID,
+        actor: str,
         file: IncomingFile
 ) -> Commission:
     uploads.check(file, allowed_types=uploads.RECEIPT_TYPES, max_bytes=uploads.MAX_RECEIPT_BYTES)
     comm = await get_commission_for_update(db, commission_id)
+    _require_party(comm, actor, "client", "upload the receipt")
     # Checked before anything is stored, so a refused request leaves no file behind.
     _require_status(comm, CommissionStatus.PAYMENT_PENDING, action="Uploading a receipt")
     comm.payment_receipt_key = await storage.upload_receipt(
@@ -326,10 +356,12 @@ async def upload_receipt(
 async def confirm_payment(
         db: AsyncSession,
         commission_id: uuid.UUID,
+        actor: str,
         *,
         payment_method: PaymentMethod | None = None
 ) -> Commission:
     comm = await get_commission_for_update(db, commission_id)
+    _require_party(comm, actor, "artist", "confirm payment")
     _require_status(comm, CommissionStatus.PAYMENT_PENDING, action="Confirming payment")
     comm.payment_confirmed_at = _utcnow()
     comm.payment_method = payment_method or PaymentMethod.GCASH
@@ -341,11 +373,13 @@ async def confirm_payment(
 async def create_wip_update(
         db: AsyncSession,
         commission_id: uuid.UUID,
+        actor: str,
         file: IncomingFile,
         note: str | None = None
 ) -> Commission:
     uploads.check(file, allowed_types=uploads.IMAGE_TYPES, max_bytes=uploads.MAX_ARTWORK_BYTES)
     comm = await get_commission_for_update(db, commission_id)
+    _require_party(comm, actor, "artist", "post a WIP update")
     _require_status(
         comm,
         CommissionStatus.IN_PROGRESS,
@@ -370,10 +404,12 @@ async def create_wip_update(
 async def deliver(
         db: AsyncSession,
         commission_id: uuid.UUID,
+        actor: str,
         file: IncomingFile
 ) -> Commission:
     uploads.check(file, allowed_types=None, max_bytes=uploads.MAX_ARTWORK_BYTES)
     comm = await get_commission_for_update(db, commission_id)
+    _require_party(comm, actor, "artist", "deliver")
     if comm.status == CommissionStatus.IN_PROGRESS:
         raise InvalidState("Post at least one WIP update before delivering the final file")
     _require_status(comm, CommissionStatus.WIP, action="Delivering")
@@ -391,18 +427,28 @@ async def deliver(
     return comm
 
 
-async def complete_commission(db: AsyncSession, commission_id: uuid.UUID) -> Commission:
+async def complete_commission(db: AsyncSession, commission_id: uuid.UUID, actor: str) -> Commission:
     comm = await get_commission_for_update(db, commission_id)
+    _require_party(comm, actor, "client", "accept the delivery")
     _require_status(comm, CommissionStatus.DELIVERED, action="Completing")
     mark_completed(comm)
     await db.flush()
     return comm
 
 
-async def cancel_commission(db: AsyncSession, commission_id: uuid.UUID) -> Commission:
+async def cancel_commission(
+        db: AsyncSession,
+        commission_id: uuid.UUID,
+        actor: str,
+        *,
+        as_staff: bool = False
+) -> Commission:
     """Cancel before any money has changed hands. After payment a commission can
     only end through completion or a dispute."""
     comm = await get_commission_for_update(db, commission_id)
+    is_party = actor in (comm.client_discord_user_id, comm.artist_discord_user_id)
+    if not is_party and not as_staff:
+        raise Forbidden("Only the client, the artist or a moderator can cancel")
     if comm.status in (
         CommissionStatus.IN_PROGRESS,
         CommissionStatus.WIP,

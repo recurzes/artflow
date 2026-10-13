@@ -35,4 +35,18 @@ def verify_bot_secret(x_bot_secret: Annotated[str | None, Header()] = None) -> N
 # is not committed yet (or never is) and immediately read stale data.
 DBSession = Annotated[AsyncSession, Depends(get_db, scope="function")]
 RedisClient = Annotated[Redis, Depends(get_redis_client)]
+
+# Who is acting. The API cannot see Discord, so the bot states which member
+# pressed the button; services decide whether that member is allowed to.
+Actor = Annotated[
+    str,
+    Header(
+        alias="X-Actor-Discord-Id",
+        min_length=1,
+        max_length=20,
+        description="Discord user ID of the member performing this action"
+    )
+]
+# Set by the bot when that member is a moderator or administrator of the server.
+ActorIsStaff = Annotated[bool, Header(alias="X-Actor-Is-Staff")]
 BotAuth = Annotated[None, Depends(verify_bot_secret)]

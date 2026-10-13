@@ -116,24 +116,41 @@ async def test_commission_lifecycle_disputes_and_admin(bot_api, monkeypatch):
     assert (await bot_api.open_ticket(cid, channel_id))["status"] == "INTAKE"
     assert (await bot_api.get_commission_for_channel(channel_id))["id"] == cid
 
-    await bot_api.submit_intake(cid, "A portrait of my cat")
-    assert (await bot_api.quote(cid, price_php="1500.00"))["status"] == "QUOTED"
-    assert (await bot_api.counter_offer(cid, "1200?"))["status"] == "INTAKE"
-    await bot_api.quote(cid, price_php="1300.00")
-    assert (await bot_api.accept_quote(cid))["status"] == "TOS_PENDING"
-    assert (await bot_api.accept_tos(cid, artist["tos_hash"]))["status"] == "PAYMENT_PENDING"
+    await bot_api.submit_intake(cid, "A portrait of my cat", actor=buyer["discord_user_id"])
+    quoted = await bot_api.quote(cid, actor=artist_user["discord_user_id"], price_php="1500.00")
+    assert quoted["status"] == "QUOTED"
+    countered = await bot_api.counter_offer(cid, "1200?", actor=buyer["discord_user_id"])
+    assert countered["status"] == "INTAKE"
+    await bot_api.quote(cid, actor=artist_user["discord_user_id"], price_php="1300.00")
+    agreed = await bot_api.accept_quote(cid, actor=buyer["discord_user_id"])
+    assert agreed["status"] == "TOS_PENDING"
+    accepted = await bot_api.accept_tos(cid, artist["tos_hash"], actor=buyer["discord_user_id"])
+    assert accepted["status"] == "PAYMENT_PENDING"
     receipt = await bot_api.upload_receipt(
-        cid, filename="proof.png", content=b"\x89PNG" + b"\x00" * 32, content_type="image/png"
+        cid,
+        actor=buyer["discord_user_id"],
+        filename="proof.png",
+        content=b"\x89PNG" + b"\x00" * 32,
+        content_type="image/png",
     )
     assert receipt["payment_receipt_key"].startswith(f"receipts/{cid}/")
-    assert (await bot_api.confirm_payment(cid))["status"] == "IN_PROGRESS"
+    paid = await bot_api.confirm_payment(cid, actor=artist_user["discord_user_id"])
+    assert paid["status"] == "IN_PROGRESS"
     wip = await bot_api.post_wip(
-        cid, filename="sketch.png", content=b"\x89PNG" + b"\x00" * 32, content_type="image/png",
+        cid,
+        actor=artist_user["discord_user_id"],
+        filename="sketch.png",
+        content=b"\x89PNG" + b"\x00" * 32,
+        content_type="image/png",
         note="sketch",
     )
     assert wip["status"] == "WIP"
     delivered = await bot_api.deliver(
-        cid, filename="final.psd", content=b"8BPS" + b"\x00" * 32, content_type=None
+        cid,
+        actor=artist_user["discord_user_id"],
+        filename="final.psd",
+        content=b"8BPS" + b"\x00" * 32,
+        content_type=None,
     )
     assert delivered["status"] == "DELIVERED"
     assert delivered["delivery_file_key"].endswith(".psd")
@@ -151,9 +168,9 @@ async def test_commission_lifecycle_disputes_and_admin(bot_api, monkeypatch):
     assert files["receipt_url"] == f"https://signed.example/{receipt['payment_receipt_key']}"
     assert files["delivery_url"] == f"https://signed.example/{delivered['delivery_file_key']}"
 
-    assert (await bot_api.complete(cid))["status"] == "COMPLETED"
+    assert (await bot_api.complete(cid, actor=buyer["discord_user_id"]))["status"] == "COMPLETED"
     assert (await bot_api.get_commission(cid))["completed_at"] is not None
-    review = await bot_api.review(cid, reviewer_id=buyer["id"], rating=5, body="Great")
+    review = await bot_api.review(cid, actor=buyer["discord_user_id"], rating=5, body="Great")
     assert review["rating"] == 5
     assert (await bot_api.admin_stats(server["id"]))["completed_today"] == 1
 
@@ -163,11 +180,11 @@ async def test_commission_lifecycle_disputes_and_admin(bot_api, monkeypatch):
     )
     sid = second["id"]
     await bot_api.open_ticket(sid, make_discord_id())
-    await bot_api.submit_intake(sid, "Another one")
-    await bot_api.quote(sid, price_php="900.00")
-    await bot_api.accept_quote(sid)
-    await bot_api.accept_tos(sid, artist["tos_hash"])
-    await bot_api.confirm_payment(sid)
+    await bot_api.submit_intake(sid, "Another one", actor=buyer["discord_user_id"])
+    await bot_api.quote(sid, actor=artist_user["discord_user_id"], price_php="900.00")
+    await bot_api.accept_quote(sid, actor=buyer["discord_user_id"])
+    await bot_api.accept_tos(sid, artist["tos_hash"], actor=buyer["discord_user_id"])
+    await bot_api.confirm_payment(sid, actor=artist_user["discord_user_id"])
 
     dispute = await bot_api.open_dispute(
         sid, raised_by=artist_user["discord_user_id"], reason="Client stopped replying"
@@ -196,7 +213,7 @@ async def test_errors_carry_the_message_written_for_the_user(bot_api):
         server_id=artist["server_id"], artist_id=artist["id"], client_id=buyer["id"]
     )
     with pytest.raises(APIError) as wrong_state:
-        await bot_api.complete(commission["id"])
+        await bot_api.complete(commission["id"], actor=buyer["discord_user_id"])
     assert wrong_state.value.status == 409
     assert "inquiry" in wrong_state.value.detail
 
@@ -208,7 +225,7 @@ async def test_validation_errors_are_readable(bot_api):
     )
 
     with pytest.raises(APIError) as invalid:
-        await bot_api.review(commission["id"], reviewer_id=buyer["id"], rating=9)
+        await bot_api.review(commission["id"], actor=buyer["discord_user_id"], rating=9)
 
     assert invalid.value.status == 422
     assert invalid.value.detail.startswith("rating:")
@@ -252,4 +269,24 @@ async def test_cancel(bot_api):
     )
     assert commission["client_discord_user_id"] == buyer["discord_user_id"]
 
-    assert (await bot_api.cancel(commission["id"]))["status"] == "CANCELLED"
+    with pytest.raises(APIError) as stranger:
+        await bot_api.cancel(commission["id"], actor=make_discord_id())
+    assert stranger.value.status == 403
+
+    # a moderator may, when the bot vouches for them
+    cancelled = await bot_api.cancel(commission["id"], actor=make_discord_id(), as_staff=True)
+    assert cancelled["status"] == "CANCELLED"
+
+
+async def test_the_api_decides_who_may_act(bot_api):
+    _, artist_user, buyer, artist = await _setup(bot_api)
+    commission = await bot_api.create_commission(
+        server_id=artist["server_id"], artist_id=artist["id"], client_id=buyer["id"]
+    )
+    await bot_api.open_ticket(commission["id"], make_discord_id())
+
+    with pytest.raises(APIError) as refused:
+        await bot_api.quote(commission["id"], actor=buyer["discord_user_id"], price_php="100.00")
+
+    assert refused.value.status == 403
+    assert refused.value.detail == "Only the artist can send a quote"

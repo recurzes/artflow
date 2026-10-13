@@ -16,7 +16,7 @@ from api.commissions.schemas import (
     TosAcceptBody,
 )
 from api.commissions.uploads import IncomingFile
-from api.dependencies import BotAuth, DBSession
+from api.dependencies import Actor, ActorIsStaff, BotAuth, DBSession
 from shared.models.commission import PaymentMethod
 
 router = APIRouter(prefix="/commissions", tags=["commissions"])
@@ -111,9 +111,10 @@ async def submit_intake(
         commission_id: uuid.UUID,
         body: IntakeSubmitBody,
         db: DBSession,
-        _auth: BotAuth
+        _auth: BotAuth,
+        actor: Actor
 ) -> CommissionRead:
-    comm = await commission_service.submit_intake(db, commission_id, body.notes)
+    comm = await commission_service.submit_intake(db, commission_id, actor, body.notes)
     return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/quote", response_model=CommissionRead)
@@ -121,9 +122,10 @@ async def apply_quote(
         commission_id: uuid.UUID,
         body: QuoteCreate,
         db: DBSession,
-        _auth: BotAuth
+        _auth: BotAuth,
+        actor: Actor
 ) -> CommissionRead:
-    comm = await commission_service.apply_quote(db, commission_id, body)
+    comm = await commission_service.apply_quote(db, commission_id, actor, body)
     return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/counter-offer", response_model=CommissionRead)
@@ -131,11 +133,13 @@ async def counter_offer(
         commission_id: uuid.UUID,
         body: CounterOfferBody,
         db: DBSession,
-        _auth: BotAuth
+        _auth: BotAuth,
+        actor: Actor
 ) -> CommissionRead:
     comm = await commission_service.request_counter_offer(
         db,
         commission_id,
+        actor,
         notes=body.notes
     )
     return CommissionRead.model_validate(comm)
@@ -144,9 +148,10 @@ async def counter_offer(
 async def accept_quote(
         commission_id: uuid.UUID,
         db: DBSession,
-        _auth: BotAuth
+        _auth: BotAuth,
+        actor: Actor
 ) -> CommissionRead:
-    comm = await commission_service.accept_quote(db, commission_id)
+    comm = await commission_service.accept_quote(db, commission_id, actor)
     return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/tos-accept", response_model=CommissionRead)
@@ -154,11 +159,13 @@ async def accept_tos(
         commission_id: uuid.UUID,
         db: DBSession,
         body: TosAcceptBody,
-        _auth: BotAuth
+        _auth: BotAuth,
+        actor: Actor
 ) -> CommissionRead:
     comm = await commission_service.confirm_tos_acceptance(
         db,
         commission_id,
+        actor,
         body.tos_version_hash
     )
     return CommissionRead.model_validate(comm)
@@ -168,11 +175,13 @@ async def upload_receipt(
         commission_id: uuid.UUID,
         db: DBSession,
         _auth: BotAuth,
+        actor: Actor,
         file: UploadFile = File(...)
 ) -> CommissionRead:
     comm = await commission_service.upload_receipt(
         db,
         commission_id,
+        actor,
         await _incoming(file, uploads.MAX_RECEIPT_BYTES)
     )
     return CommissionRead.model_validate(comm)
@@ -182,11 +191,13 @@ async def confirm_payment(
         commission_id: uuid.UUID,
         db: DBSession,
         _auth: BotAuth,
+        actor: Actor,
         method: Annotated[PaymentMethod | None, Query()] = None
 ) -> CommissionRead:
     comm = await commission_service.confirm_payment(
         db,
         commission_id,
+        actor,
         payment_method=method
     )
     return CommissionRead.model_validate(comm)
@@ -196,12 +207,14 @@ async def wip_update(
         commission_id: uuid.UUID,
         db: DBSession,
         _auth: BotAuth,
+        actor: Actor,
         file: UploadFile = File(...),
         note: str | None = Form(default=None, max_length=2000)
 ) -> CommissionRead:
     comm = await commission_service.create_wip_update(
         db,
         commission_id,
+        actor,
         await _incoming(file, uploads.MAX_ARTWORK_BYTES),
         note
     )
@@ -212,11 +225,13 @@ async def deliver(
         commission_id: uuid.UUID,
         db: DBSession,
         _auth: BotAuth,
+        actor: Actor,
         file: UploadFile = File(...)
 ) -> CommissionRead:
     comm = await commission_service.deliver(
         db,
         commission_id,
+        actor,
         await _incoming(file, uploads.MAX_ARTWORK_BYTES)
     )
     return CommissionRead.model_validate(comm)
@@ -225,16 +240,24 @@ async def deliver(
 async def complete(
         commission_id: uuid.UUID,
         db: DBSession,
-        _auth: BotAuth
+        _auth: BotAuth,
+        actor: Actor
 ) -> CommissionRead:
-    comm = await commission_service.complete_commission(db, commission_id)
+    comm = await commission_service.complete_commission(db, commission_id, actor)
     return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/cancel", response_model=CommissionRead)
 async def cancel(
         commission_id: uuid.UUID,
         db: DBSession,
-        _auth: BotAuth
+        _auth: BotAuth,
+        actor: Actor,
+        as_staff: ActorIsStaff = False
 ) -> CommissionRead:
-    comm = await commission_service.cancel_commission(db, commission_id)
+    comm = await commission_service.cancel_commission(
+        db,
+        commission_id,
+        actor,
+        as_staff=as_staff
+    )
     return CommissionRead.model_validate(comm)

@@ -3,7 +3,7 @@ End-to-end walks through the commission lifecycle, using only the HTTP API the
 bot uses. If these pass, a commission can get from request to review.
 """
 from tests.conftest import make_discord_id
-from tests.factories import PDF, PNG
+from tests.factories import ACTION_ROLES, PDF, PNG, acting
 
 TOS = "50% refund before the sketch, none after."
 
@@ -14,13 +14,23 @@ class Scene:
     def __init__(self, client) -> None:
         self.client = client
 
+    def actor_for(self, path: str) -> dict[str, str]:
+        """Headers naming the party who performs the action at the end of `path`."""
+        role = ACTION_ROLES.get(path.rsplit("/", 1)[-1])
+        if role is None:
+            return {}
+        party = self.buyer if role == "client" else self.artist
+        return acting(party["discord_user_id"])
+
     async def post(self, path: str, json: dict | None = None, *, expect: int = 200) -> dict:
-        response = await self.client.post(path, json=json)
+        response = await self.client.post(path, json=json, headers=self.actor_for(path))
         assert response.status_code == expect, f"{path}: {response.status_code} {response.text}"
         return response.json()
 
     async def upload(self, path: str, file: tuple = PNG, **form: str) -> dict:
-        response = await self.client.post(path, files={"file": file}, data=form or None)
+        response = await self.client.post(
+            path, files={"file": file}, data=form or None, headers=self.actor_for(path)
+        )
         assert response.status_code == 200, f"{path}: {response.status_code} {response.text}"
         return response.json()
 
@@ -132,7 +142,7 @@ async def test_commission_from_request_to_review(client):
 
     await scene.post(
         f"{scene.base}/review",
-        {"reviewer_id": scene.buyer["id"], "rating": 5, "body": "Perfect"},
+        {"rating": 5, "body": "Perfect"},
         expect=201,
     )
     artist = await scene.get(f"/artists/{scene.artist['id']}")
@@ -155,7 +165,9 @@ async def test_steps_cannot_be_skipped(client):
         ("deliver", {"files": {"file": PNG}}),
         ("complete", {}),
     ):
-        response = await client.post(f"{scene.base}/{path}", **request)
+        response = await client.post(
+            f"{scene.base}/{path}", headers=scene.actor_for(path), **request
+        )
         assert response.status_code == 409, f"{path}: {response.text}"
 
     assert (await scene.get(scene.base))["status"] == "INTAKE"
@@ -183,7 +195,9 @@ async def test_dispute_freezes_the_commission_until_resolved(client):
         ("deliver", {"files": {"file": PNG}}),
         ("complete", {}),
     ):
-        response = await client.post(f"{scene.base}/{path}", **request)
+        response = await client.post(
+            f"{scene.base}/{path}", headers=scene.actor_for(path), **request
+        )
         assert response.status_code == 409, f"{path}: {response.text}"
         assert "dispute" in response.json()["detail"]
 
@@ -200,7 +214,9 @@ async def test_dispute_freezes_the_commission_until_resolved(client):
 
     # A cancelled commission cannot be reviewed.
     review = await client.post(
-        f"{scene.base}/review", json={"reviewer_id": scene.buyer["id"], "rating": 1}
+        f"{scene.base}/review",
+        headers=scene.actor_for("review"),
+        json={"rating": 1},
     )
     assert review.status_code == 409
 

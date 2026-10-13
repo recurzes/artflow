@@ -4,7 +4,7 @@ The scheduled sweeps: payment expiry, delivery auto-accept, payment reminders.
 from datetime import datetime, timedelta, timezone
 
 from shared.models.commission import CommissionStatus
-from tests.factories import make_artist, make_commission, make_user
+from tests.factories import as_client, make_artist, make_commission, make_user
 
 S = CommissionStatus
 
@@ -120,7 +120,8 @@ class TestAutoAccept:
 
         review = await client.post(
             f"/commissions/{commission.id}/review",
-            json={"reviewer_id": str(buyer.id), "rating": 4},
+            headers=as_client(commission),
+            json={"rating": 4},
         )
 
         assert review.status_code == 201, review.text
@@ -162,7 +163,7 @@ class TestPaymentReminders:
         )
 
         accepted = await client.post(
-            f"/commissions/{commission.id}/tos-accept",
+            f"/commissions/{commission.id}/tos-accept", headers=as_client(commission),
             json={
                 "tos_version_hash": (await client.get(f"/artists/{artist.id}")).json()["tos_hash"]
             },

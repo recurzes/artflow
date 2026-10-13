@@ -77,18 +77,21 @@ class TestAcceptQuote:
 
         await accept_quote_flow(interaction)
 
-        api.accept_quote.assert_awaited_once_with("commission-uuid")
+        api.accept_quote.assert_awaited_once_with("commission-uuid", actor=CLIENT_ID)
         embed = sent_embeds(channel)[0]
         assert "No refunds after the sketch." in embed.description
         button = channel.send.await_args.kwargs["view"].children[0]
         assert button.custom_id == f"artflow:tos_accept:{TOS_HASH[:16]}"
 
-    async def test_only_the_client_can_accept(self):
+    async def test_the_api_refusing_the_actor_is_relayed(self):
         interaction, api, channel = _scene(ARTIST_ID, "QUOTED")
+        api.accept_quote.side_effect = APIError(403, "Only the client can accept the quote")
 
         await accept_quote_flow(interaction)
 
-        api.accept_quote.assert_not_awaited()
+        # the bot states who pressed the button and lets the API decide
+        api.accept_quote.assert_awaited_once_with("commission-uuid", actor=ARTIST_ID)
+        channel.send.assert_not_awaited()
         assert "Only the client can accept the quote" in reply_text(interaction)
 
     async def test_artist_without_terms_is_prompted_and_no_button_is_posted(self):
@@ -132,7 +135,7 @@ class TestTosAcceptButton:
 
         await TosAcceptButton(TOS_HASH[:16]).callback(interaction)
 
-        api.accept_tos.assert_awaited_once_with("commission-uuid", TOS_HASH)
+        api.accept_tos.assert_awaited_once_with("commission-uuid", TOS_HASH, actor=CLIENT_ID)
         fields = {f.name: f.value for f in sent_embeds(channel)[0].fields}
         assert fields["Amount due"] == "₱1,500.00 PHP"
         assert fields["GCash number"] == "09171234567"
@@ -152,12 +155,14 @@ class TestTosAcceptButton:
         new_button = channel.send.await_args.kwargs["view"].children[0]
         assert new_button.custom_id.endswith("cd" * 8)
 
-    async def test_only_the_client_can_accept(self):
-        interaction, api, _ = _scene(ARTIST_ID, "TOS_PENDING")
+    async def test_the_api_refusing_the_actor_is_relayed(self):
+        interaction, api, channel = _scene(ARTIST_ID, "TOS_PENDING")
+        api.accept_tos.side_effect = APIError(403, "Only the client can accept the terms")
 
         await TosAcceptButton(TOS_HASH[:16]).callback(interaction)
 
-        api.accept_tos.assert_not_awaited()
+        channel.send.assert_not_awaited()  # no payment instructions
+        assert "Only the client can accept the terms" in reply_text(interaction)
 
     async def test_button_is_restored_from_its_custom_id(self):
         button = tos_accept_view(TOS_HASH).children[0]
@@ -195,7 +200,11 @@ class TestPay:
 
         # the bot hands the file to the API; it never touches storage itself
         api.upload_receipt.assert_awaited_once_with(
-            "commission-uuid", filename="receipt.png", content=b"bytes", content_type="image/png"
+            "commission-uuid",
+            actor=CLIENT_ID,
+            filename="receipt.png",
+            content=b"bytes",
+            content_type="image/png",
         )
         sent = channel.send.await_args.kwargs
         assert sent["file"].filename == "receipt.png"
@@ -218,12 +227,14 @@ class TestPay:
         api.upload_receipt.assert_not_awaited()
         assert "file type is not accepted" in reply_text(interaction)
 
-    async def test_only_the_client_can_pay(self):
-        interaction, api, _ = _scene(ARTIST_ID, "PAYMENT_PENDING")
+    async def test_the_api_refusing_the_actor_is_relayed(self):
+        interaction, api, channel = _scene(ARTIST_ID, "PAYMENT_PENDING")
+        api.upload_receipt.side_effect = APIError(403, "Only the client can upload the receipt")
 
         await self._pay(interaction, _attachment())
 
-        api.upload_receipt.assert_not_awaited()
+        channel.send.assert_not_awaited()
+        assert "Only the client can upload the receipt" in reply_text(interaction)
 
     async def test_a_refusal_from_the_api_is_shown(self):
         interaction, api, channel = _scene(CLIENT_ID, "PAYMENT_PENDING")
@@ -243,7 +254,9 @@ class TestOtherCommands:
 
         await cog_instance.quote.callback(cog_instance, interaction, 1500.0, "two characters")
 
-        api.quote.assert_awaited_once_with("commission-uuid", price_php="1500.00")
+        api.quote.assert_awaited_once_with(
+            "commission-uuid", actor=ARTIST_ID, price_php="1500.00"
+        )
         assert isinstance(channel.send.await_args.kwargs["view"], QuoteActionsView)
         assert "₱1,500.00" in sent_embeds(channel)[0].description
         assert "$26.25 USD" in sent_embeds(channel)[0].description
@@ -266,13 +279,15 @@ class TestOtherCommands:
         assert "No refunds after the sketch." in sent_embeds(channel)[0].description
         api.accept_tos.assert_not_awaited()  # showing the terms is not accepting them
 
-    async def test_confirm_payment_is_for_the_artist(self):
+    async def test_confirm_payment_names_the_actor_and_relays_a_refusal(self):
         interaction, api, channel = _scene(CLIENT_ID, "PAYMENT_PENDING")
+        api.confirm_payment.side_effect = APIError(403, "Only the artist can confirm payment")
         cog_instance = CommissionCog(interaction.client)
 
         await cog_instance.confirm_payment_cmd.callback(cog_instance, interaction)
 
-        api.confirm_payment.assert_not_awaited()
+        api.confirm_payment.assert_awaited_once_with("commission-uuid", actor=CLIENT_ID)
+        channel.send.assert_not_awaited()
         assert "Only the artist can confirm payment" in reply_text(interaction)
 
 
