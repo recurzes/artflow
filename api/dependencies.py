@@ -42,8 +42,7 @@ Actor = Annotated[
     str,
     Header(
         alias="X-Actor-Discord-Id",
-        min_length=1,
-        max_length=20,
+        pattern=r"^\d{15,20}$",
         description="Discord user ID of the member performing this action"
     )
 ]

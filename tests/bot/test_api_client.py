@@ -300,3 +300,26 @@ async def test_the_api_decides_who_may_act(bot_api):
 
     assert refused.value.status == 403
     assert refused.value.detail == "Only the artist can send a quote"
+
+
+async def test_whole_body_validation_errors_read_as_a_sentence(bot_api):
+    """A rule about two fields has no field name to prefix, and no "Value error,"."""
+    guild_id = make_discord_id()
+    await bot_api.register_server(guild_id, "Art Hub", {})
+
+    with pytest.raises(APIError) as invalid:
+        await bot_api.apply_as_artist(
+            guild_id=guild_id,
+            discord_user_id=make_discord_id(),
+            account_created_at=_created(400),
+            display_name="Mika",
+            styles=["anime"],
+            social_links={"Twitter": "https://x.com/mika", "Pixiv": "https://pixiv.net/mika"},
+            price_min_php="3000",
+            price_max_php="500",
+            gcash_number="09171234567",
+            paypal_email=None,
+        )
+
+    assert invalid.value.status == 422
+    assert invalid.value.detail == "The minimum price cannot be above the maximum price"

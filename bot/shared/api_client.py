@@ -44,11 +44,13 @@ def _detail_from(response: httpx.Response) -> str:
     if isinstance(detail, str) and detail:
         return detail
     if isinstance(detail, list):  # request validation errors
-        parts = [
-            f"{'.'.join(str(p) for p in item.get('loc', [])[1:])}: {item.get('msg', '')}"
-            for item in detail
-            if isinstance(item, dict)
-        ]
+        parts = []
+        for item in detail:
+            if not isinstance(item, dict):
+                continue
+            field = ".".join(str(p) for p in item.get("loc", [])[1:])
+            message = str(item.get("msg", "")).removeprefix("Value error, ")
+            parts.append(f"{field}: {message}" if field else message)
         if parts:
             return "; ".join(parts)
     if response.status_code >= 500:

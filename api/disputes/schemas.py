@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.common import DiscordId
 from shared.models.dispute import DisputeStatus
 
 
@@ -13,7 +14,7 @@ class DisputeCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     commission_id: uuid.UUID
-    raised_by_discord_user_id: str = Field(min_length=1, max_length=20)
+    raised_by_discord_user_id: DiscordId
     reason: str = Field(min_length=1, max_length=8000)
 
 
@@ -22,7 +23,7 @@ class DisputeResolve(BaseModel):
 
     resolution: str = Field(min_length=1, max_length=8000)
     set_commission_status: Literal["COMPLETED", "CANCELLED"] = "CANCELLED"
-    resolved_by_discord_user_id: str = Field(min_length=1, max_length=20)
+    resolved_by_discord_user_id: DiscordId
 
 
 class DisputeRead(BaseModel):
