@@ -8,7 +8,7 @@ from api.artists import repository
 from api.artists.schemas import ArtistApplication, ArtistUpdate
 from api.servers import service as server_service
 from api.users import service as user_service
-from shared.errors import Conflict, InvalidState, NotFound
+from shared.errors import Conflict, Forbidden, InvalidState, NotFound
 from shared.models.artist import Artist, ArtistStatus
 
 # How long a rejected applicant waits before applying again
@@ -169,9 +169,46 @@ async def reject(
 
 # Profile
 
-async def update_artist(db: AsyncSession, artist_id: uuid.UUID, data: ArtistUpdate) -> Artist:
-    artist = await get_artist(db, artist_id)
+def _require_owner(artist: Artist, actor: str, action: str) -> None:
+    if artist.user.discord_user_id != actor:
+        raise Forbidden(f"Only the artist can {action}")
+
+
+async def update_artist(
+        db: AsyncSession,
+        artist_id: uuid.UUID,
+        actor: str,
+        data: ArtistUpdate
+) -> Artist:
+    artist = await get_artist_for_update(db, artist_id)
+    _require_owner(artist, actor, "change their profile")
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(artist, field, value)
+    await db.flush()
+    return artist
+
+
+async def set_availability(
+        db: AsyncSession,
+        artist_id: uuid.UUID,
+        actor: str,
+        *,
+        open: bool
+) -> Artist:
+    """An approved artist opens or closes themselves for new commissions.
+
+    Closed artists are not offered to clients and cannot be commissioned; work
+    already in progress is unaffected.
+    """
+    artist = await get_artist_for_update(db, artist_id)
+    _require_owner(artist, actor, "change their availability")
+    if artist.status not in (ArtistStatus.ACTIVE, ArtistStatus.INACTIVE):
+        reasons = {
+            ArtistStatus.PENDING: "Your artist application has not been approved yet",
+            ArtistStatus.REJECTED: "Your artist application was not approved",
+            ArtistStatus.SUSPENDED: "Your artist profile is suspended; contact a moderator",
+        }
+        raise InvalidState(reasons[artist.status])
+    artist.status = ArtistStatus.ACTIVE if open else ArtistStatus.INACTIVE
     await db.flush()
     return artist

@@ -249,8 +249,19 @@ class APIClient:
             json={"moderator_discord_user_id": str(moderator), "reason": reason},
         )
 
-    async def update_artist(self, artist_id: str, **fields: Any) -> Json:
-        return await self._request("PATCH", f"/artists/{artist_id}", json=fields)
+    async def update_artist(self, artist_id: str, *, actor: int | str, **fields: Any) -> Json:
+        return await self._request("PATCH", f"/artists/{artist_id}", json=fields, actor=actor)
+
+    async def set_artist_availability(
+            self,
+            artist_id: str,
+            *,
+            actor: int | str,
+            open: bool
+    ) -> Json:
+        return await self._request(
+            "POST", f"/artists/{artist_id}/availability", json={"open": open}, actor=actor
+        )
 
     async def get_artist_capacity(self, artist_id: str) -> Json:
         return await self._request("GET", f"/artists/{artist_id}/active-commission-count")

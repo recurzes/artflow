@@ -7,6 +7,7 @@ from api.artists import service as artist_service
 from api.artists.schemas import (
     ArtistApplication,
     ArtistApproval,
+    ArtistAvailability,
     ArtistCommissionCapacity,
     ArtistListItem,
     ArtistRead,
@@ -14,7 +15,7 @@ from api.artists.schemas import (
     ArtistUpdate,
 )
 from api.commissions import service as commission_service
-from api.dependencies import BotAuth, DBSession
+from api.dependencies import Actor, BotAuth, DBSession
 from shared.models.artist import Artist
 
 router = APIRouter(prefix="/artists", tags=["artists"])
@@ -125,9 +126,21 @@ async def update_artist(
         artist_id: uuid.UUID,
         body: ArtistUpdate,
         db: DBSession,
-        _auth: BotAuth
+        _auth: BotAuth,
+        actor: Actor
 ) -> ArtistRead:
-    artist = await artist_service.update_artist(db, artist_id, body)
+    artist = await artist_service.update_artist(db, artist_id, actor, body)
+    return _artist_to_read(artist)
+
+@router.post("/{artist_id}/availability", response_model=ArtistRead)
+async def set_availability(
+        artist_id: uuid.UUID,
+        body: ArtistAvailability,
+        db: DBSession,
+        _auth: BotAuth,
+        actor: Actor
+) -> ArtistRead:
+    artist = await artist_service.set_availability(db, artist_id, actor, open=body.open)
     return _artist_to_read(artist)
 
 

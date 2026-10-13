@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 import sentry_sdk
@@ -17,6 +18,7 @@ from shared.config import settings
 from shared.db import dispose_engine
 from shared.redis import close_pool, get_pool
 from shared.storage import close_client as close_storage_client
+from shared.storage import ensure_buckets_exist
 
 if settings.sentry_dsn:
     sentry_sdk.init(
@@ -31,9 +33,25 @@ if settings.sentry_dsn:
     )
 
 
+logger = logging.getLogger(__name__)
+
+
+async def _prepare_storage() -> None:
+    """Create the storage buckets on first run. Never fatal: everything except
+    file uploads works without storage, and the logs say why uploads will not."""
+    if not settings.supabase_url or not settings.supabase_service_key:
+        logger.warning("Supabase Storage is not configured; file uploads will fail")
+        return
+    try:
+        await ensure_buckets_exist()
+    except Exception:
+        logger.exception("Could not verify the storage buckets; file uploads may fail")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_pool()
+    await _prepare_storage()
     yield
     await close_pool()
     await dispose_engine()

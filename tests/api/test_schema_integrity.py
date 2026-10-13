@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from shared.models.artist import Artist
 from shared.models.commission import Commission, CommissionStatus
 from tests.conftest import ROOT, make_discord_id
-from tests.factories import make_artist, make_commission, make_server, make_user
+from tests.factories import acting, make_artist, make_commission, make_server, make_user
 
 S = CommissionStatus
 
@@ -95,7 +95,11 @@ async def test_updated_at_moves_when_a_row_changes(client, db):
     artist = await make_artist(db)
     before = (await client.get(f"/artists/{artist.id}")).json()
 
-    await client.patch(f"/artists/{artist.id}", json={"bio": "Now taking chibi commissions"})
+    await client.patch(
+        f"/artists/{artist.id}",
+        headers=acting(artist.test_discord_id),
+        json={"bio": "Now taking chibi commissions"},
+    )
 
     after = (await client.get(f"/artists/{artist.id}")).json()
     assert after["created_at"] == before["created_at"]

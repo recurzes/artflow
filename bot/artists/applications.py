@@ -244,6 +244,7 @@ class ApproveApplicationButton(
                     "`/showcase` — post portfolio images to category channels\n"
                     "`/settings tos` — set the terms clients accept before paying\n"
                     "`/settings nsfw` — choose whether you take NSFW commissions\n"
+                    "`/commissions close` / `open` — pause or resume taking commissions\n"
                     "`/quote` — post a price quote inside a commission ticket\n"
                     "`/wip` — post a work-in-progress update\n"
                     "`/deliver` — deliver the final file to your client\n\n"

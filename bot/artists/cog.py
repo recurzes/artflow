@@ -157,7 +157,11 @@ class ArtistCog(commands.Cog, name="Artists"):
                 server["id"],
                 interaction.user.id
             )
-            await self.bot.api.update_artist(artist_row["id"], tos_text=text)
+            await self.bot.api.update_artist(
+                artist_row["id"],
+                actor=interaction.user.id,
+                tos_text=text
+            )
         except APIError as exc:
             await interaction.followup.send(embed=error_embed(exc.detail), ephemeral=True)
             return
@@ -171,7 +175,7 @@ class ArtistCog(commands.Cog, name="Artists"):
 
     @settings_group.command(
         name="nsfw",
-        description="Enable or disable NSFW commission requests (Week 9)"
+        description="Enable or disable NSFW commission requests"
     )
     @app_commands.describe(enabled="Whether you accept NSFW commissions")
     async def settings_nsfw(
@@ -193,7 +197,11 @@ class ArtistCog(commands.Cog, name="Artists"):
                 server["id"],
                 interaction.user.id
             )
-            await self.bot.api.update_artist(artist_row["id"], nsfw_enabled=enabled)
+            await self.bot.api.update_artist(
+                artist_row["id"],
+                actor=interaction.user.id,
+                nsfw_enabled=enabled
+            )
         except APIError as exc:
             await interaction.followup.send(embed=error_embed(exc.detail), ephemeral=True)
             return
@@ -215,46 +223,61 @@ class ArtistCog(commands.Cog, name="Artists"):
         description="Mark yourself as open for commissions"
     )
     async def commissions_open(self, interaction: discord.Interaction) -> None:
+        await self._set_availability(interaction, open=True)
+
+    @commissions_group.command(
+        name="close",
+        description="Stop taking new commissions (work in progress is unaffected)"
+    )
+    async def commissions_close(self, interaction: discord.Interaction) -> None:
+        await self._set_availability(interaction, open=False)
+
+    async def _set_availability(self, interaction: discord.Interaction, *, open: bool) -> None:
         await interaction.response.defer(ephemeral=True)
-
-
-
-    async def _set_commission_status(
-            self,
-            interaction: discord.Interaction,
-            open_status: bool
-    ) -> None:
-        status_label = "OPEN" if open_status else "CLOSED"
-
-        try:
-            pass
-        except Exception as exc:
-            logger.error("Failed to update commission status: %s", exc)
+        guild = interaction.guild
+        if guild is None:
             await interaction.followup.send(
-                embed=error_embed("Could not update your status. Please try again."),
+                embed=error_embed("Use this command in a server"),
                 ephemeral=True
             )
             return
+        try:
+            server = await self.bot.api.get_server(guild.id)
+            artist_row = await self.bot.api.get_artist_for_member(
+                server["id"],
+                interaction.user.id
+            )
+            await self.bot.api.set_artist_availability(
+                artist_row["id"],
+                actor=interaction.user.id,
+                open=open
+            )
+        except APIError as exc:
+            await interaction.followup.send(embed=error_embed(exc.detail), ephemeral=True)
+            return
 
-        # Post to #commissions-open channel
-        channel = layout.channel(interaction.guild, "channel_commissions_open")
-        if channel and open_status:
+        # Announce openings where clients look for artists
+        channel = layout.channel(guild, "channel_commissions_open")
+        if channel and open:
             embed = base_embed(
                 title=f"{interaction.user.display_name} is OPEN for Commissions!",
-                description=(
-                    f"DM {interaction.user.mention} or open a ticket with `/commission request`."
-                )
+                description=f"Start a ticket with {interaction.user.mention} using `/commission`."
             )
             embed.set_author(
                 name=str(interaction.user),
                 icon_url=interaction.user.display_avatar.url
             )
-            await channel.send(embed=embed)
+            try:
+                await channel.send(embed=embed)
+            except discord.HTTPException:
+                logger.warning("Could not announce availability in %s", guild.name)
 
+        label = "OPEN" if open else "CLOSED"
         await interaction.followup.send(
             embed=success_embed(
-                f"Commissions {status_label}",
-                f"Your commission status is now **{status_label}**"
+                f"Commissions {label}",
+                "Clients can commission you again with `/commission`." if open else
+                "You no longer appear in `/commission`. Commissions already under way continue."
             ),
             ephemeral=True
         )
