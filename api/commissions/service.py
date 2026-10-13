@@ -7,7 +7,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.artists import service as artist_service
-from api.commissions import repository, uploads
+from api.commissions import exchange_rates, repository, uploads
 from api.commissions.schemas import CommissionCreate, QuoteCreate
 from api.commissions.uploads import IncomingFile
 from api.servers import service as server_service
@@ -230,13 +230,16 @@ async def apply_quote(
         commission_id: uuid.UUID,
         quote: QuoteCreate
 ) -> Commission:
+    # Looked up before the row is locked: it may be a network call.
+    price_usd = quote.quoted_price_usd
+    if price_usd is None:
+        price_usd = await exchange_rates.php_to_usd(quote.quoted_price_php)
+
     comm = await get_commission_for_update(db, commission_id)
     _require_status(comm, CommissionStatus.INTAKE, action="Quoting")
 
     comm.quoted_price_php = float(quote.quoted_price_php)
-    comm.quoted_price_usd = (
-        float(quote.quoted_price_usd) if quote.quoted_price_usd is not None else None
-    )
+    comm.quoted_price_usd = float(price_usd) if price_usd is not None else None
     comm.currency_used = quote.currency_used
     comm.revisions_allowed = quote.revisions_allowed
     if quote.deadline_at is not None:

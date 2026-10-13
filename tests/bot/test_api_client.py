@@ -117,7 +117,7 @@ async def test_commission_lifecycle_disputes_and_admin(bot_api, monkeypatch):
     assert (await bot_api.get_commission_for_channel(channel_id))["id"] == cid
 
     await bot_api.submit_intake(cid, "A portrait of my cat")
-    assert (await bot_api.quote(cid, price_php="1500.00", price_usd="26.10"))["status"] == "QUOTED"
+    assert (await bot_api.quote(cid, price_php="1500.00"))["status"] == "QUOTED"
     assert (await bot_api.counter_offer(cid, "1200?"))["status"] == "INTAKE"
     await bot_api.quote(cid, price_php="1300.00")
     assert (await bot_api.accept_quote(cid))["status"] == "TOS_PENDING"

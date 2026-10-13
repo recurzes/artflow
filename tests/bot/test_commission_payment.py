@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import discord
 
-from bot.cogs import commission as cog
 from bot.cogs.commission import (
     CommissionCog,
     QuoteActionsView,
@@ -237,16 +236,26 @@ class TestPay:
 
 
 class TestOtherCommands:
-    async def test_quote_is_sent_by_the_artist_with_action_buttons(self, monkeypatch):
-        monkeypatch.setattr(cog, "php_to_usd", AsyncMock(return_value=None))
+    async def test_quote_is_sent_by_the_artist_with_action_buttons(self):
         interaction, api, channel = _scene(ARTIST_ID, "INTAKE")
+        api.quote.return_value = _commission("QUOTED", quoted_price_usd="26.25")
         cog_instance = CommissionCog(interaction.client)
 
         await cog_instance.quote.callback(cog_instance, interaction, 1500.0, "two characters")
 
-        api.quote.assert_awaited_once_with("commission-uuid", price_php="1500.00", price_usd=None)
+        api.quote.assert_awaited_once_with("commission-uuid", price_php="1500.00")
         assert isinstance(channel.send.await_args.kwargs["view"], QuoteActionsView)
         assert "₱1,500.00" in sent_embeds(channel)[0].description
+        assert "$26.25 USD" in sent_embeds(channel)[0].description
+
+    async def test_quote_without_a_usd_figure_shows_pesos_only(self):
+        interaction, api, channel = _scene(ARTIST_ID, "INTAKE")
+        api.quote.return_value = _commission("QUOTED", quoted_price_usd=None)
+        cog_instance = CommissionCog(interaction.client)
+
+        await cog_instance.quote.callback(cog_instance, interaction, 1500.0, "")
+
+        assert "USD" not in sent_embeds(channel)[0].description
 
     async def test_confirm_tos_reposts_the_terms(self):
         interaction, api, channel = _scene(CLIENT_ID, "TOS_PENDING")

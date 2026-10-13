@@ -31,6 +31,9 @@ class Settings(BaseSettings):
 
     sentry_dsn: str = ""
 
+    # Optional: exchangerate.host key. Without it quotes are shown in PHP only.
+    exchange_rate_access_key: str = ""
+
     db_pool_size: int = 20
     db_max_overflow: int = 50
     db_echo: bool = False

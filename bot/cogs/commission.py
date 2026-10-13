@@ -4,7 +4,6 @@ import io
 import logging
 import re
 from datetime import datetime, timezone
-from decimal import Decimal
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -38,7 +37,6 @@ from bot.utils.uploads import (
     download,
     is_image,
 )
-from shared.exchange_rates import php_to_usd
 
 logger = logging.getLogger(__name__)
 
@@ -805,12 +803,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
         await interaction.response.defer(ephemeral=True)
         try:
             comm = await ticket_commission(interaction, only="artist", action="send a quote")
-            usd = await php_to_usd(Decimal(str(amount)))
-            await self.bot.api.quote(
-                comm["id"],
-                price_php=f"{amount:.2f}",
-                price_usd=str(usd) if usd is not None else None
-            )
+            quoted = await self.bot.api.quote(comm["id"], price_php=f"{amount:.2f}")
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -819,8 +812,9 @@ class CommissionCog(commands.Cog, name="Commissions"):
             return
 
         desc = f"**₱{amount:,.2f} PHP**"
+        usd = _float_or_none(quoted.get("quoted_price_usd"))
         if usd is not None:
-            desc += f" (~${float(usd):,.2f} USD)"
+            desc += f" (~${usd:,.2f} USD)"
         if notes:
             desc += f"\n\n{notes}"
         await interaction.channel.send(

@@ -288,7 +288,6 @@ class APIClient:
             commission_id: str,
             *,
             price_php: str,
-            price_usd: str | None = None,
             revisions_allowed: int = 2
     ) -> Json:
         return await self._request(
@@ -296,7 +295,6 @@ class APIClient:
             f"/commissions/{commission_id}/quote",
             json={
                 "quoted_price_php": price_php,
-                "quoted_price_usd": price_usd,
                 "currency_used": "PHP",
                 "revisions_allowed": revisions_allowed,
             },
