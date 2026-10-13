@@ -1,13 +1,14 @@
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
-from shared.errors import Conflict, DomainError, Forbidden, NotFound
+from shared.errors import Conflict, DomainError, Forbidden, InvalidInput, NotFound
 
 # Most specific class first; InvalidState is a Conflict.
 _STATUS_CODES: tuple[tuple[type[DomainError], int], ...] = (
     (NotFound, status.HTTP_404_NOT_FOUND),
     (Forbidden, status.HTTP_403_FORBIDDEN),
     (Conflict, status.HTTP_409_CONFLICT),
+    (InvalidInput, status.HTTP_422_UNPROCESSABLE_CONTENT),
 )
 
 

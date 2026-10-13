@@ -39,7 +39,6 @@ from bot.utils.uploads import (
     is_image,
 )
 from shared.exchange_rates import php_to_usd
-from shared.storage import upload_delivery_file, upload_receipt, upload_wip_image
 
 logger = logging.getLogger(__name__)
 
@@ -895,8 +894,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
             await reply_error(interaction, str(exc))
             return
 
-        # Checked here as well as by the API, so nothing is stored for a request
-        # that is going to be refused.
+        # The API enforces all of this; checking here first saves downloading and
+        # sending a file that is going to be refused.
         if comm["status"] != "PAYMENT_PENDING":
             await reply_error(
                 interaction,
@@ -915,14 +914,14 @@ class CommissionCog(commands.Cog, name="Commissions"):
 
         try:
             raw = await receipt.read()
-            key = await upload_receipt(raw, receipt.filename, str(comm["id"]))
-            await self.bot.api.upload_receipt(comm["id"], key)
+            await self.bot.api.upload_receipt(
+                comm["id"],
+                filename=receipt.filename,
+                content=raw,
+                content_type=receipt.content_type
+            )
         except APIError as exc:
             await reply_error(interaction, exc.detail)
-            return
-        except Exception:
-            logger.exception("Could not store the receipt for commission %s", comm["id"])
-            await reply_error(interaction, "The receipt could not be stored. Please try again")
             return
 
         embed = success_embed(
@@ -998,14 +997,15 @@ class CommissionCog(commands.Cog, name="Commissions"):
 
         try:
             raw = await image.read()
-            key = await upload_wip_image(raw, image.filename, str(comm["id"]), watermarked=False)
-            await self.bot.api.post_wip(comm["id"], key, note or None)
+            await self.bot.api.post_wip(
+                comm["id"],
+                filename=image.filename,
+                content=raw,
+                content_type=image.content_type,
+                note=note or None
+            )
         except APIError as exc:
             await reply_error(interaction, exc.detail)
-            return
-        except Exception:
-            logger.exception("Could not store the WIP image for commission %s", comm["id"])
-            await reply_error(interaction, "The image could not be stored. Please try again")
             return
 
         # The image itself is posted in the ticket, so the client sees it here.
@@ -1056,14 +1056,14 @@ class CommissionCog(commands.Cog, name="Commissions"):
 
         try:
             raw = await file.read()
-            key = await upload_delivery_file(raw, file.filename, str(comm["id"]))
-            delivered = await self.bot.api.deliver(comm["id"], key)
+            delivered = await self.bot.api.deliver(
+                comm["id"],
+                filename=file.filename,
+                content=raw,
+                content_type=file.content_type
+            )
         except APIError as exc:
             await reply_error(interaction, exc.detail)
-            return
-        except Exception:
-            logger.exception("Could not store the delivery for commission %s", comm["id"])
-            await reply_error(interaction, "The file could not be stored. Please try again")
             return
 
         auto_accept = _discord_time(delivered.get("delivery_auto_accept_at"))

@@ -122,10 +122,21 @@ async def test_commission_lifecycle_disputes_and_admin(bot_api, monkeypatch):
     await bot_api.quote(cid, price_php="1300.00")
     assert (await bot_api.accept_quote(cid))["status"] == "TOS_PENDING"
     assert (await bot_api.accept_tos(cid, artist["tos_hash"]))["status"] == "PAYMENT_PENDING"
-    assert (await bot_api.upload_receipt(cid, "receipts/a.png"))["payment_receipt_key"]
+    receipt = await bot_api.upload_receipt(
+        cid, filename="proof.png", content=b"\x89PNG" + b"\x00" * 32, content_type="image/png"
+    )
+    assert receipt["payment_receipt_key"].startswith(f"receipts/{cid}/")
     assert (await bot_api.confirm_payment(cid))["status"] == "IN_PROGRESS"
-    assert (await bot_api.post_wip(cid, "wip/a.png", "sketch"))["status"] == "WIP"
-    assert (await bot_api.deliver(cid, "wip/final.png"))["status"] == "DELIVERED"
+    wip = await bot_api.post_wip(
+        cid, filename="sketch.png", content=b"\x89PNG" + b"\x00" * 32, content_type="image/png",
+        note="sketch",
+    )
+    assert wip["status"] == "WIP"
+    delivered = await bot_api.deliver(
+        cid, filename="final.psd", content=b"8BPS" + b"\x00" * 32, content_type=None
+    )
+    assert delivered["status"] == "DELIVERED"
+    assert delivered["delivery_file_key"].endswith(".psd")
 
     stats = await bot_api.admin_stats(server["id"])
     assert stats["active_commissions"] == 1
@@ -137,8 +148,8 @@ async def test_commission_lifecycle_disputes_and_admin(bot_api, monkeypatch):
 
     monkeypatch.setattr(storage, "get_signed_url", _fake_signed_url)
     files = await bot_api.get_commission_files(cid)
-    assert files["receipt_url"] == "https://signed.example/receipts/a.png"
-    assert files["delivery_url"] == "https://signed.example/wip/final.png"
+    assert files["receipt_url"] == f"https://signed.example/{receipt['payment_receipt_key']}"
+    assert files["delivery_url"] == f"https://signed.example/{delivered['delivery_file_key']}"
 
     assert (await bot_api.complete(cid))["status"] == "COMPLETED"
     assert (await bot_api.get_commission(cid))["completed_at"] is not None

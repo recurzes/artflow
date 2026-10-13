@@ -1,26 +1,35 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, File, Form, Query, UploadFile, status
 
 from api.commissions import service as commission_service
+from api.commissions import uploads
 from api.commissions.schemas import (
     CommissionCreate,
     CommissionFiles,
     CommissionRead,
     CounterOfferBody,
-    DeliverySubmitBody,
     IntakeSubmitBody,
     QuoteCreate,
-    ReceiptUploadBody,
     TicketOpenBody,
     TosAcceptBody,
-    WipCreateBody,
 )
+from api.commissions.uploads import IncomingFile
 from api.dependencies import BotAuth, DBSession
 from shared.models.commission import PaymentMethod
 
 router = APIRouter(prefix="/commissions", tags=["commissions"])
+
+
+async def _incoming(file: UploadFile, max_bytes: int) -> IncomingFile:
+    # One byte past the limit is enough to know it is too large, without
+    # reading an arbitrarily big upload into memory.
+    return IncomingFile(
+        filename=file.filename or "upload",
+        content=await file.read(max_bytes + 1),
+        content_type=file.content_type
+    )
 
 
 @router.get(
@@ -158,13 +167,13 @@ async def accept_tos(
 async def upload_receipt(
         commission_id: uuid.UUID,
         db: DBSession,
-        body: ReceiptUploadBody,
-        _auth: BotAuth
+        _auth: BotAuth,
+        file: UploadFile = File(...)
 ) -> CommissionRead:
     comm = await commission_service.upload_receipt(
         db,
         commission_id,
-        body.payment_receipt_key
+        await _incoming(file, uploads.MAX_RECEIPT_BYTES)
     )
     return CommissionRead.model_validate(comm)
 
@@ -185,21 +194,31 @@ async def confirm_payment(
 @router.post("/{commission_id}/wip-update", response_model=CommissionRead)
 async def wip_update(
         commission_id: uuid.UUID,
-        body: WipCreateBody,
         db: DBSession,
-        _auth: BotAuth
+        _auth: BotAuth,
+        file: UploadFile = File(...),
+        note: str | None = Form(default=None, max_length=2000)
 ) -> CommissionRead:
-    comm = await commission_service.create_wip_update(db, commission_id, body)
+    comm = await commission_service.create_wip_update(
+        db,
+        commission_id,
+        await _incoming(file, uploads.MAX_ARTWORK_BYTES),
+        note
+    )
     return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/deliver", response_model=CommissionRead)
 async def deliver(
         commission_id: uuid.UUID,
-        body: DeliverySubmitBody,
         db: DBSession,
-        _auth: BotAuth
+        _auth: BotAuth,
+        file: UploadFile = File(...)
 ) -> CommissionRead:
-    comm = await commission_service.deliver(db, commission_id, body.file_key)
+    comm = await commission_service.deliver(
+        db,
+        commission_id,
+        await _incoming(file, uploads.MAX_ARTWORK_BYTES)
+    )
     return CommissionRead.model_validate(comm)
 
 @router.post("/{commission_id}/complete", response_model=CommissionRead)

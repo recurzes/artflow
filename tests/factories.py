@@ -10,6 +10,11 @@ from shared.models.server import Server
 from shared.models.user import User
 from tests.conftest import make_discord_id
 
+# (filename, content, content type) as httpx's `files=` takes them
+PNG = ("art.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "image/png")
+PDF = ("receipt.pdf", b"%PDF-1.4 " + b"\x00" * 64, "application/pdf")
+ZIP = ("layers.zip", b"PK\x03\x04" + b"\x00" * 64, "application/zip")
+
 
 async def make_server(db: AsyncSession, **overrides) -> Server:
     server = Server(

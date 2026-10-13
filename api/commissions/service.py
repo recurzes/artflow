@@ -7,12 +7,9 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.artists import service as artist_service
-from api.commissions import repository
-from api.commissions.schemas import (
-    CommissionCreate,
-    QuoteCreate,
-    WipCreateBody,
-)
+from api.commissions import repository, uploads
+from api.commissions.schemas import CommissionCreate, QuoteCreate
+from api.commissions.uploads import IncomingFile
 from api.servers import service as server_service
 from api.users import service as user_service
 from shared import storage
@@ -308,11 +305,17 @@ async def confirm_tos_acceptance(
 async def upload_receipt(
         db: AsyncSession,
         commission_id: uuid.UUID,
-        payment_receipt_key: str
+        file: IncomingFile
 ) -> Commission:
+    uploads.check(file, allowed_types=uploads.RECEIPT_TYPES, max_bytes=uploads.MAX_RECEIPT_BYTES)
     comm = await get_commission_for_update(db, commission_id)
+    # Checked before anything is stored, so a refused request leaves no file behind.
     _require_status(comm, CommissionStatus.PAYMENT_PENDING, action="Uploading a receipt")
-    comm.payment_receipt_key = payment_receipt_key
+    comm.payment_receipt_key = await storage.upload_receipt(
+        file.content,
+        file.filename,
+        str(comm.id)
+    )
     await db.flush()
     return comm
 
@@ -335,8 +338,10 @@ async def confirm_payment(
 async def create_wip_update(
         db: AsyncSession,
         commission_id: uuid.UUID,
-        body: WipCreateBody
+        file: IncomingFile,
+        note: str | None = None
 ) -> Commission:
+    uploads.check(file, allowed_types=uploads.IMAGE_TYPES, max_bytes=uploads.MAX_ARTWORK_BYTES)
     comm = await get_commission_for_update(db, commission_id)
     _require_status(
         comm,
@@ -344,12 +349,13 @@ async def create_wip_update(
         CommissionStatus.WIP,
         action="Posting a WIP update"
     )
+    image_key = await storage.upload_wip_image(file.content, file.filename, str(comm.id))
     await repository.add_wip_update(
         db,
         WipUpdate(
             commission_id=comm.id,
-            image_key=body.image_key,
-            artist_note=body.artist_note
+            image_key=image_key,
+            artist_note=note
         )
     )
     if comm.status == CommissionStatus.IN_PROGRESS:
@@ -361,15 +367,20 @@ async def create_wip_update(
 async def deliver(
         db: AsyncSession,
         commission_id: uuid.UUID,
-        file_key: str
+        file: IncomingFile
 ) -> Commission:
+    uploads.check(file, allowed_types=None, max_bytes=uploads.MAX_ARTWORK_BYTES)
     comm = await get_commission_for_update(db, commission_id)
     if comm.status == CommissionStatus.IN_PROGRESS:
         raise InvalidState("Post at least one WIP update before delivering the final file")
     _require_status(comm, CommissionStatus.WIP, action="Delivering")
 
     now = _utcnow()
-    comm.delivery_file_key = file_key
+    comm.delivery_file_key = await storage.upload_delivery_file(
+        file.content,
+        file.filename,
+        str(comm.id)
+    )
     comm.delivered_at = now
     comm.delivery_auto_accept_at = now + timedelta(hours=DELIVERY_AUTO_ACCEPT_HOURS)
     _transition(comm, CommissionStatus.DELIVERED)

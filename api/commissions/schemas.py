@@ -38,22 +38,6 @@ class TosAcceptBody(BaseModel):
     tos_version_hash: str
 
 
-class ReceiptUploadBody(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    payment_receipt_key: str
-
-
-class DeliverySubmitBody(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    file_key: str
-
-
-class WipCreateBody(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    image_key: str
-    artist_note: str | None = None
-
-
 class IntakeSubmitBody(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     notes: str = Field(min_length=1, max_length=12000)
