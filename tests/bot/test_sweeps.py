@@ -3,9 +3,9 @@ The bot side of the timers: ask the API what is due, tell the ticket.
 """
 from unittest.mock import AsyncMock, MagicMock
 
-from bot.cogs.commission import ReviewPromptView
-from bot.cogs.sweeps import SweepCog, run_sweeps
-from bot.utils.api_client import APIError
+from bot.commissions.completion import ReviewPromptView
+from bot.commissions.sweeps import SweepCog, run_sweeps
+from bot.shared.api_client import APIError
 from tests.bot.fakes import make_channel, make_guild, make_member, sent_embeds
 
 CLIENT_ID, ARTIST_ID = 1001, 2002

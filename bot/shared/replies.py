@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import discord
 
-from bot.utils.embeds import error_embed, success_embed
+from bot.shared.embeds import error_embed, success_embed
 
 
 async def reply_error(interaction: discord.Interaction, message: str) -> None:

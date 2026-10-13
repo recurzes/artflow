@@ -5,15 +5,15 @@ from unittest.mock import AsyncMock
 
 import discord
 
-from bot.cogs.commission import CommissionCog
-from bot.utils.api_client import APIError
-from bot.utils.tickets import (
+from bot.commissions.cog import CommissionCog
+from bot.commissions.tickets import (
     MAX_CHANNELS_PER_CATEGORY,
     _safe_channel_slug,
     category_with_room,
     close_ticket,
     create_commission_ticket,
 )
+from bot.shared.api_client import APIError
 from shared.discord_layout import CATEGORY_CLOSED_TICKETS, CATEGORY_TICKETS, ROLE_MODERATOR
 from tests.bot.fakes import (
     make_category,

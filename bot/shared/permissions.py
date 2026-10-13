@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import discord
 
-from shared.discord_layout import ROLE_MODERATOR
-
-
-def has_role(member: discord.abc.User, role_name: str) -> bool:
-    return isinstance(member, discord.Member) and any(r.name == role_name for r in member.roles)
+from bot.shared import layout
 
 
 def is_admin(member: discord.abc.User) -> bool:
@@ -18,4 +14,8 @@ def is_staff(member: discord.abc.User) -> bool:
     if not isinstance(member, discord.Member):
         return False
     perms = member.guild_permissions
-    return perms.administrator or perms.manage_guild or has_role(member, ROLE_MODERATOR)
+    return (
+        perms.administrator
+        or perms.manage_guild
+        or layout.has_role(member, "role_moderator")
+    )

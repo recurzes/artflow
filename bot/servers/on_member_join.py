@@ -3,8 +3,9 @@ import logging
 import discord
 from discord.ext import commands
 
-from bot.utils.embeds import base_embed
-from shared.discord_layout import CHANNEL_RULES_AND_TOS, ROLE_UNVERIFIED
+from bot.shared import layout
+from bot.shared.embeds import base_embed
+from shared.discord_layout import CHANNEL_RULES_AND_TOS
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class MemberJoinEvents(commands.Cog):
         await self._send_welcome_dm(member)
 
     async def _assign_unverified_role(self, member: discord.Member) -> None:
-        role = discord.utils.get(member.guild.roles, name=ROLE_UNVERIFIED)
+        role = layout.role(member.guild, "role_unverified")
         if role is None:
             logger.warning(
                 "Unverified role not found in guild %s (%s). Skipping role assignment.",

@@ -3,8 +3,8 @@ Raising and resolving a dispute from Discord.
 """
 from unittest.mock import AsyncMock
 
-from bot.cogs.dispute import DisputeCog, DisputeResolveView, resolve_dispute_flow
-from bot.utils.api_client import APIError
+from bot.disputes.cog import DisputeCog, DisputeResolveView, resolve_dispute_flow
+from bot.shared.api_client import APIError
 from shared.discord_layout import ROLE_MODERATOR
 from tests.bot.fakes import (
     make_channel,
@@ -35,7 +35,6 @@ def _scene(member, *, before: str, after: str):
     api.get_commission_for_channel.return_value = _commission(before)
     api.get_commission.return_value = _commission(after)
     api.get_dispute_for_commission.return_value = {"id": "dispute-uuid"}
-    api.get_server.return_value = {"settings": {}}
     channel = make_channel()
     interaction = make_interaction(member, guild=make_guild(member), channel=channel, api=api)
     return interaction, api, channel

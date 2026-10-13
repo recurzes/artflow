@@ -1,10 +1,10 @@
 """
-The pure parts of the artist cog: parsing the application form and building
+The pure parts of artist onboarding: parsing the application form and building
 the moderation embed and its persistent buttons.
 """
 import re
 
-from bot.cogs.artist import (
+from bot.artists.applications import (
     APPROVE_BUTTON_ID,
     ApproveApplicationButton,
     RejectApplicationButton,

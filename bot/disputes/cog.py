@@ -7,14 +7,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.cogs.commission import announce_completed
-from bot.utils.api_client import APIError
-from bot.utils.audit_log import format_commission_snapshot, post_admin_log
-from bot.utils.embeds import base_embed
-from bot.utils.permissions import is_staff
-from bot.utils.replies import reply_error, reply_success
-from bot.utils.tickets import TicketError, close_ticket, ticket_commission
-from shared.discord_layout import ROLE_MODERATOR
+from bot.commissions.completion import announce_completed
+from bot.commissions.tickets import TicketError, close_ticket, ticket_commission
+from bot.shared import layout
+from bot.shared.api_client import APIError
+from bot.shared.audit_log import format_commission_snapshot, post_admin_log
+from bot.shared.embeds import base_embed
+from bot.shared.permissions import is_staff
+from bot.shared.replies import reply_error, reply_success
 
 logger = logging.getLogger(__name__)
 
@@ -156,10 +156,7 @@ class DisputeCog(commands.Cog, name="Disputes"):
             await reply_error(interaction, exc.detail)
             return
 
-        mod_role = discord.utils.get(
-            interaction.guild.roles,
-            name=ROLE_MODERATOR
-        )
+        mod_role = layout.role(interaction.guild, "role_moderator")
         mention = mod_role.mention if mod_role else "@moderators"
         await interaction.channel.send(
             content=f"{mention} **Dispute opened** by {interaction.user.mention}",

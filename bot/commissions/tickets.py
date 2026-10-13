@@ -6,8 +6,9 @@ from typing import Any
 
 import discord
 
-from bot.utils.api_client import APIError
-from shared.discord_layout import CATEGORY_CLOSED_TICKETS, CATEGORY_TICKETS, ROLE_MODERATOR
+from bot.shared import layout
+from bot.shared.api_client import APIError
+from shared.discord_layout import CATEGORY_CLOSED_TICKETS, CATEGORY_TICKETS
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ async def create_commission_ticket(
         nsfw: bool = False
 ) -> discord.TextChannel:
     everyone = guild.default_role
-    mod_role = discord.utils.get(guild.roles, name=ROLE_MODERATOR)
+    mod_role = layout.role(guild, "role_moderator")
     me = guild.me
     if me is None:
         raise RuntimeError("Bot member not available in guild")

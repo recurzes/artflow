@@ -42,7 +42,7 @@ from sqlalchemy.pool import NullPool  # noqa: E402
 
 from api.dependencies import get_db, get_redis_client  # noqa: E402
 from api.main import app  # noqa: E402
-from bot.utils.api_client import APIClient  # noqa: E402
+from bot.shared.api_client import APIClient  # noqa: E402
 from shared import storage  # noqa: E402
 from shared.config import settings  # noqa: E402
 

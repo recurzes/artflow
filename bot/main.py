@@ -8,7 +8,7 @@ from discord.ext import commands
 from sentry_sdk.integrations.aiohttp import AioHttpIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 
-from bot.utils.api_client import APIClient
+from bot.shared.api_client import APIClient
 from shared.config import settings
 
 logging.basicConfig(
@@ -31,15 +31,15 @@ if settings.sentry_dsn:
     )
 
 COGS: list[str] = [
-    "bot.events.on_member_join",
-    "bot.events.on_guild_join",
-    "bot.cogs.verification",
-    "bot.cogs.age_verification",
-    "bot.cogs.artist",
-    "bot.cogs.commission",
-    "bot.cogs.dispute",
-    "bot.cogs.sweeps",
-    "bot.cogs.admin"
+    "bot.servers.on_member_join",
+    "bot.servers.on_guild_join",
+    "bot.verification.cog",
+    "bot.verification.age",
+    "bot.artists.cog",
+    "bot.commissions.cog",
+    "bot.disputes.cog",
+    "bot.commissions.sweeps",
+    "bot.admin.cog"
 ]
 
 INTENTS = discord.Intents.default()
@@ -91,7 +91,7 @@ class ArtflowBot(commands.AutoShardedBot):
             interaction: discord.Interaction,
             error: discord.app_commands.AppCommandError
     ) -> None:
-        from bot.utils.embeds import error_embed
+        from bot.shared.embeds import error_embed
 
         msg = "An unexpected error occurred. Please try again"
         if isinstance(error, discord.app_commands.MissingPermissions):

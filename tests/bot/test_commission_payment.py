@@ -6,16 +6,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import discord
 
-from bot.cogs.commission import (
-    CommissionCog,
+from bot.commissions.cog import CommissionCog
+from bot.commissions.payment import (
     QuoteActionsView,
     TosAcceptButton,
     accept_quote_flow,
     tos_accept_view,
 )
-from bot.utils.api_client import APIError
-from bot.utils.embeds import payment_instructions_embed
-from bot.utils.uploads import MAX_RECEIPT_BYTES, RECEIPT_TYPES, check_attachment
+from bot.shared.api_client import APIError
+from bot.shared.embeds import payment_instructions_embed
+from bot.shared.uploads import MAX_RECEIPT_BYTES, RECEIPT_TYPES, check_attachment
 from tests.bot.fakes import (
     make_channel,
     make_guild,
