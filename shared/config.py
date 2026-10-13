@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_service_key: str = ""
 
-    storage_bucket_portfolio: str = "portfolio"
     storage_bucket_wip: str = "wip"
     storage_bucket_receipts: str = "receipts"
 

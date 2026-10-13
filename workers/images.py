@@ -1,23 +1,23 @@
+"""
+Image work that is too slow for a request: watermarking WIP previews.
+
+Not built yet. The task below is a placeholder so the worker has a registered
+task and the queue name is settled; nothing enqueues it. When it is built, the
+API (not the bot) should enqueue it after storing a WIP image, and the result
+belongs in wip_updates.watermarked_key.
+"""
 import logging
 
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
-@celery_app.task(
-    bind=True,
-    max_retries=2,
-    default_retry_delay=30,
-    name="images.apply_watermark"
-)
-def apply_watermark(self, commission_id: str, image_url: str) -> dict:
-    logger.info("Watermark task queued for commission %s, image %s", commission_id, image_url)
-    try:
-        # TODO: download image_url, apply Pillow watermark, upload to Supabase
-        return {"original_url": image_url, "watermarked_url": None}
-    except Exception as exc:
-        logger.error(
-            "Watermark failed for commission %s (attempt %d): %s",
-            commission_id, self.request.retries + 1, exc
-        )
-        raise self.retry(exc=exc)
+
+@celery_app.task(name="images.apply_watermark")
+def apply_watermark(commission_id: str, image_key: str) -> dict:
+    logger.warning(
+        "images.apply_watermark is not implemented (commission %s, image %s)",
+        commission_id,
+        image_key
+    )
+    return {"image_key": image_key, "watermarked_key": None}

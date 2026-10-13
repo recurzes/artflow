@@ -487,7 +487,9 @@ class CommissionCog(commands.Cog, name="Commissions"):
     @app_commands.describe(note="Describe the changes you'd like")
     async def revision(self, interaction: discord.Interaction, note: str) -> None:
         await interaction.response.send_message(
-            "Revision system coming in Week 7.", ephemeral=True
+            "ArtFlow does not track revisions yet. "
+            "Describe the change you need here in the ticket and agree it with the artist.",
+            ephemeral=True
         )
 
 

@@ -49,21 +49,6 @@ async def signed_url_for(ref: str, expires_in: int = 3600) -> str:
 
 
 # Upload helpers. Each returns the reference to store, not a URL.
-async def upload_portfolio_image(
-        file_bytes: bytes,
-        filename: str,
-        artist_id: str
-) -> str:
-    ext = PurePosixPath(filename).suffix or ".jpg"
-    key = f"{artist_id}/{uuid.uuid4()}{ext}"
-    return await _upload(
-        bucket=settings.storage_bucket_portfolio,
-        key=key,
-        data=file_bytes,
-        content_type=_content_type(filename),
-        upsert=False
-    )
-
 async def upload_wip_image(
         file_bytes: bytes,
         filename: str,
@@ -116,19 +101,10 @@ async def upload_delivery_file(
 
 
 # URL Helpers
-async def get_public_url(bucket: str, key: str) -> str:
-    client = await get_client()
-    response = client.storage.from_(bucket).get_public_url(key)
-    return response
-
 async def get_signed_url(bucket: str, key: str, expires_in: int = 3600) -> str:
     client = await get_client()
     response = await client.storage.from_(bucket).create_signed_url(key, expires_in)
     return response["signedUrl"]
-
-async def delete_file(bucket: str, key: str) -> None:
-    client = await get_client()
-    await client.storage.from_(bucket).remove([key])
 
 
 # Bucket setup
@@ -137,8 +113,8 @@ async def ensure_buckets_exist() -> None:
     existing = await client.storage.list_buckets()
     existing_names = {b.name for b in existing}
 
+    # Both private: files are only ever reached through short-lived signed links.
     buckets = [
-        (settings.storage_bucket_portfolio, True),
         (settings.storage_bucket_wip, False),
         (settings.storage_bucket_receipts, False)
     ]

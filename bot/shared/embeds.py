@@ -6,7 +6,6 @@ COLOR_PRIMARY = discord.Color.from_str("#5865F2")
 COLOR_SUCCESS = discord.Color.green()
 COLOR_WARNING = discord.Color.orange()
 COLOR_ERROR = discord.Color.red()
-COLOR_INFO = discord.Color.blurple()
 
 
 def base_embed(

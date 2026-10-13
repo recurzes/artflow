@@ -42,14 +42,15 @@ COGS: list[str] = [
     "bot.admin.cog"
 ]
 
+# Slash commands and buttons only: the bot never reads message text, so it does
+# not ask for the privileged message-content intent.
 INTENTS = discord.Intents.default()
 INTENTS.members = True
-INTENTS.message_content = True
 
 class ArtflowBot(commands.AutoShardedBot):
     def __init__(self) -> None:
         super().__init__(
-            command_prefix="!",
+            command_prefix=commands.when_mentioned,
             intents=INTENTS,
             help_command=None
         )
@@ -68,6 +69,8 @@ class ArtflowBot(commands.AutoShardedBot):
 
         await self.load_cogs()
 
+        # The process restarts only on deploy, which is exactly when the command
+        # set may have changed, so syncing here is what publishes new commands.
         await self.tree.sync()
         logger.info("Slash commands synced")
 
@@ -82,7 +85,7 @@ class ArtflowBot(commands.AutoShardedBot):
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,
-                name="art commissions | /help"
+                name="art commissions | /commission"
             )
         )
 
