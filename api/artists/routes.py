@@ -1,5 +1,4 @@
 import uuid
-from decimal import Decimal
 
 from fastapi import APIRouter, Query, status
 
@@ -19,11 +18,6 @@ from api.dependencies import Actor, BotAuth, DBSession
 from shared.models.artist import Artist
 
 router = APIRouter(prefix="/artists", tags=["artists"])
-
-def _dec_price(value: object | None) -> Decimal | None:
-    if value is None:
-        return None
-    return Decimal(str(value))
 
 @router.get("", response_model=list[ArtistListItem])
 async def list_artists(
@@ -45,9 +39,9 @@ async def list_artists(
             display_name=a.display_name,
             discord_user_id=a.user.discord_user_id,
             styles=a.styles,
-            price_min_php=_dec_price(a.price_min_php),
-            price_max_php=_dec_price(a.price_max_php),
-            rating_avg=Decimal(str(a.rating_avg)),
+            price_min_php=a.price_min_php,
+            price_max_php=a.price_max_php,
+            rating_avg=a.rating_avg,
             rating_count=a.rating_count,
             nsfw_enabled=a.nsfw_enabled,
             status=a.status,
@@ -159,11 +153,11 @@ def _artist_to_read(artist: Artist) -> ArtistRead:
         styles=artist.styles,
         social_links=artist.social_links,
         portfolio_images=artist.portfolio_images,
-        price_min_php=_dec_price(artist.price_min_php),
-        price_max_php=_dec_price(artist.price_max_php),
+        price_min_php=artist.price_min_php,
+        price_max_php=artist.price_max_php,
         nsfw_enabled=artist.nsfw_enabled,
         max_active_commissions=artist.max_active_commissions,
-        rating_avg=Decimal(str(artist.rating_avg)),
+        rating_avg=artist.rating_avg,
         rating_count=artist.rating_count,
         status=artist.status,
         tos_text=artist.tos_text,

@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from pydantic import BaseModel
 
@@ -8,7 +9,7 @@ from shared.models.artist import ArtistStatus
 class AdminStats(BaseModel):
     active_commissions: int
     completed_today: int
-    revenue_php_this_month: float
+    revenue_php_this_month: Decimal
 
 
 class AdminArtist(BaseModel):

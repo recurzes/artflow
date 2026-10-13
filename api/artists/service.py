@@ -108,8 +108,8 @@ async def apply(db: AsyncSession, data: ArtistApplication) -> Artist:
     artist.display_name = data.display_name
     artist.styles = data.styles
     artist.social_links = data.social_links
-    artist.price_min_php = float(data.price_min_php) if data.price_min_php is not None else None
-    artist.price_max_php = float(data.price_max_php) if data.price_max_php is not None else None
+    artist.price_min_php = data.price_min_php
+    artist.price_max_php = data.price_max_php
     artist.gcash_number = data.gcash_number
     artist.paypal_email = data.paypal_email
     artist.status = ArtistStatus.PENDING

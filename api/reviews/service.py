@@ -47,7 +47,7 @@ async def create_review(
     # average, so concurrent reviews cannot make the stored figure drift.
     artist = await artist_service.get_artist_for_update(db, comm.artist_id)
     average, count = await repository.rating_summary_for_artist(db, comm.artist_id)
-    artist.rating_avg = float((average or Decimal(0)).quantize(Decimal("0.01")))
+    artist.rating_avg = (average or Decimal(0)).quantize(Decimal("0.01"))
     artist.rating_count = count
 
     await db.flush()

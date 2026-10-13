@@ -1,6 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
@@ -73,11 +74,11 @@ class Artist(Base, TimestampMixin):
         default=list,
         nullable=False
     )
-    price_min_php: Mapped[float | None] = mapped_column(
+    price_min_php: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 2),
         nullable=True
     )
-    price_max_php: Mapped[float | None] = mapped_column(
+    price_max_php: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 2),
         nullable=True
     )
@@ -91,9 +92,9 @@ class Artist(Base, TimestampMixin):
         default=5,
         nullable=False
     )
-    rating_avg: Mapped[float] = mapped_column(
+    rating_avg: Mapped[Decimal] = mapped_column(
         Numeric(3, 2),
-        default=0.0,
+        default=Decimal("0"),
         nullable=False
     )
     rating_count: Mapped[int] = mapped_column(
