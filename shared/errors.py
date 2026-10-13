@@ -26,3 +26,7 @@ class Conflict(DomainError):
 
 class InvalidState(Conflict):
     """The entity is not in a state that allows this action."""
+
+
+class InvalidInput(DomainError):
+    """What the caller sent cannot be accepted (wrong file type, too large, ...)."""

@@ -12,8 +12,7 @@ WELCOME_DM = (
     "Welcome to the server!\n\n"
     "To get started:\n"
     f"1. Head to **#{CHANNEL_RULES_AND_TOS}** and accept the Terms of Service.\n"
-    "2. You'll receive a verification email - click the link to confirm.\n"
-    "3. Once verified, you can browse artists and open commissions.\n\n"
+    "2. Once verified, you can browse artists and open commissions with `/commission`.\n\n"
     "If you're an artist, run `/artist-apply` after verifying."
 )
 

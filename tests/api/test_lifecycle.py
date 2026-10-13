@@ -3,6 +3,7 @@ End-to-end walks through the commission lifecycle, using only the HTTP API the
 bot uses. If these pass, a commission can get from request to review.
 """
 from tests.conftest import make_discord_id
+from tests.factories import PDF, PNG
 
 TOS = "50% refund before the sketch, none after."
 
@@ -16,6 +17,11 @@ class Scene:
     async def post(self, path: str, json: dict | None = None, *, expect: int = 200) -> dict:
         response = await self.client.post(path, json=json)
         assert response.status_code == expect, f"{path}: {response.status_code} {response.text}"
+        return response.json()
+
+    async def upload(self, path: str, file: tuple = PNG, **form: str) -> dict:
+        response = await self.client.post(path, files={"file": file}, data=form or None)
+        assert response.status_code == 200, f"{path}: {response.status_code} {response.text}"
         return response.json()
 
     async def get(self, path: str) -> dict:
@@ -74,7 +80,7 @@ class Scene:
         await self.post(f"{self.base}/quote", {"quoted_price_php": "1500.00"})
         await self.post(f"{self.base}/accept-quote")
         await self.post(f"{self.base}/tos-accept", {"tos_version_hash": self.artist["tos_hash"]})
-        await self.post(f"{self.base}/receipt", {"payment_receipt_key": "receipts/proof.png"})
+        await self.upload(f"{self.base}/receipt")
         return await self.post(f"{self.base}/confirm-payment")
 
 
@@ -104,19 +110,19 @@ async def test_commission_from_request_to_review(client):
     assert pending["status"] == "PAYMENT_PENDING"
     assert pending["payment_deadline_at"] is not None
 
-    await scene.post(f"{scene.base}/receipt", {"payment_receipt_key": "receipts/proof.png"})
+    await scene.upload(f"{scene.base}/receipt", PDF)
     paid = await scene.post(f"{scene.base}/confirm-payment")
     assert paid["status"] == "IN_PROGRESS"
     assert paid["payment_confirmed_at"] is not None
 
     assert (
-        await scene.post(f"{scene.base}/wip-update", {"image_key": "wip/sketch.png"})
+        await scene.upload(f"{scene.base}/wip-update", note="sketch")
     )["status"] == "WIP"
     assert (
-        await scene.post(f"{scene.base}/wip-update", {"image_key": "wip/colour.png"})
+        await scene.upload(f"{scene.base}/wip-update", note="colour")
     )["status"] == "WIP"
 
-    delivered = await scene.post(f"{scene.base}/deliver", {"file_key": "wip/final.png"})
+    delivered = await scene.upload(f"{scene.base}/deliver")
     assert delivered["status"] == "DELIVERED"
     assert delivered["delivery_auto_accept_at"] is not None
 
@@ -142,14 +148,14 @@ async def test_steps_cannot_be_skipped(client):
     await scene.open_commission()
 
     # Straight from the brief to payment, delivery or completion: all refused.
-    for path, body in (
-        ("accept-quote", None),
-        ("tos-accept", {"tos_version_hash": scene.artist["tos_hash"]}),
-        ("confirm-payment", None),
-        ("deliver", {"file_key": "wip/final.png"}),
-        ("complete", None),
+    for path, request in (
+        ("accept-quote", {}),
+        ("tos-accept", {"json": {"tos_version_hash": scene.artist["tos_hash"]}}),
+        ("confirm-payment", {}),
+        ("deliver", {"files": {"file": PNG}}),
+        ("complete", {}),
     ):
-        response = await client.post(f"{scene.base}/{path}", json=body)
+        response = await client.post(f"{scene.base}/{path}", **request)
         assert response.status_code == 409, f"{path}: {response.text}"
 
     assert (await scene.get(scene.base))["status"] == "INTAKE"
@@ -158,7 +164,7 @@ async def test_steps_cannot_be_skipped(client):
 async def test_dispute_freezes_the_commission_until_resolved(client):
     scene = await Scene(client).build()
     await scene.advance_to_in_progress()
-    await scene.post(f"{scene.base}/wip-update", {"image_key": "wip/sketch.png"})
+    await scene.upload(f"{scene.base}/wip-update", note="sketch")
 
     dispute = await scene.post(
         "/disputes",
@@ -172,12 +178,12 @@ async def test_dispute_freezes_the_commission_until_resolved(client):
     assert (await scene.get(scene.base))["status"] == "DISPUTED"
 
     # Frozen: neither side can move it forward.
-    for path, body in (
-        ("wip-update", {"image_key": "wip/again.png"}),
-        ("deliver", {"file_key": "wip/final.png"}),
-        ("complete", None),
+    for path, request in (
+        ("wip-update", {"files": {"file": PNG}}),
+        ("deliver", {"files": {"file": PNG}}),
+        ("complete", {}),
     ):
-        response = await client.post(f"{scene.base}/{path}", json=body)
+        response = await client.post(f"{scene.base}/{path}", **request)
         assert response.status_code == 409, f"{path}: {response.text}"
         assert "dispute" in response.json()["detail"]
 
@@ -215,8 +221,8 @@ async def test_artist_at_capacity_frees_a_slot_when_a_commission_ends(client):
     }
     assert (await client.post("/commissions", json=body)).status_code == 409
 
-    await scene.post(f"{scene.base}/wip-update", {"image_key": "wip/sketch.png"})
-    await scene.post(f"{scene.base}/deliver", {"file_key": "wip/final.png"})
+    await scene.upload(f"{scene.base}/wip-update", note="sketch")
+    await scene.upload(f"{scene.base}/deliver")
     await scene.post(f"{scene.base}/complete")
 
     assert (await client.post("/commissions", json=body)).status_code == 201

@@ -1,5 +1,5 @@
 """
-The bot secret guards every route except /health and the public email link.
+The bot secret guards every route except /health.
 """
 import pytest
 
@@ -45,6 +45,17 @@ async def test_bot_routes_are_not_rate_limited(client):
 async def test_health_is_public(anon_client):
     response = await anon_client.get("/health")
     assert response.status_code == 200
+
+
+def test_health_is_the_only_route_without_the_bot_secret():
+    """Every other operation in the schema declares the X-Bot-Secret header."""
+    unprotected = [
+        f"{method.upper()} {path}"
+        for path, operations in create_app().openapi()["paths"].items()
+        for method, operation in operations.items()
+        if not any(p["name"] == "x-bot-secret" for p in operation.get("parameters", []))
+    ]
+    assert unprotected == ["GET /health"]
 
 
 def test_app_refuses_to_start_without_a_secret(monkeypatch):

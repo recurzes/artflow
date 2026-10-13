@@ -5,9 +5,7 @@ import re
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
-import pytest
 
-from bot.cogs import commission as cog
 from bot.cogs.commission import (
     CommissionCog,
     QuoteActionsView,
@@ -186,66 +184,78 @@ class TestPaymentEmbed:
 
 
 class TestPay:
-    @pytest.fixture
-    def upload(self, monkeypatch):
-        upload = AsyncMock(return_value="receipts/commission-uuid/abc.png")
-        monkeypatch.setattr(cog, "upload_receipt", upload)
-        return upload
-
     async def _pay(self, interaction, attachment) -> None:
         cog_instance = CommissionCog(interaction.client)
         await cog_instance.pay.callback(cog_instance, interaction, attachment)
 
-    async def test_stores_the_receipt_and_shows_it_to_the_artist(self, upload):
+    async def test_sends_the_receipt_to_the_api_and_shows_it_to_the_artist(self):
         interaction, api, channel = _scene(CLIENT_ID, "PAYMENT_PENDING")
 
         await self._pay(interaction, _attachment())
 
-        upload.assert_awaited_once()
-        # what is recorded is the storage key, never a link that expires
+        # the bot hands the file to the API; it never touches storage itself
         api.upload_receipt.assert_awaited_once_with(
-            "commission-uuid", "receipts/commission-uuid/abc.png"
+            "commission-uuid", filename="receipt.png", content=b"bytes", content_type="image/png"
         )
         sent = channel.send.await_args.kwargs
         assert sent["file"].filename == "receipt.png"
         assert sent["embed"].image.url == "attachment://receipt.png"
         assert sent["content"] == f"<@{ARTIST_ID}>"
 
-    async def test_nothing_is_stored_before_the_terms_are_accepted(self, upload):
+    async def test_nothing_is_sent_before_the_terms_are_accepted(self):
         interaction, api, _ = _scene(CLIENT_ID, "TOS_PENDING")
 
         await self._pay(interaction, _attachment())
 
-        upload.assert_not_awaited()
+        api.upload_receipt.assert_not_awaited()
         assert "tos pending" in reply_text(interaction)
 
-    async def test_wrong_file_type_is_refused(self, upload):
+    async def test_wrong_file_type_is_refused(self):
         interaction, api, _ = _scene(CLIENT_ID, "PAYMENT_PENDING")
 
         await self._pay(interaction, _attachment(content_type="application/x-msdownload"))
 
-        upload.assert_not_awaited()
+        api.upload_receipt.assert_not_awaited()
         assert "file type is not accepted" in reply_text(interaction)
 
-    async def test_only_the_client_can_pay(self, upload):
+    async def test_only_the_client_can_pay(self):
         interaction, api, _ = _scene(ARTIST_ID, "PAYMENT_PENDING")
 
         await self._pay(interaction, _attachment())
 
-        upload.assert_not_awaited()
+        api.upload_receipt.assert_not_awaited()
+
+    async def test_a_refusal_from_the_api_is_shown(self):
+        interaction, api, channel = _scene(CLIENT_ID, "PAYMENT_PENDING")
+        api.upload_receipt.side_effect = APIError(422, "That file is too large; the limit is 10 MB")
+
+        await self._pay(interaction, _attachment())
+
+        channel.send.assert_not_awaited()
+        assert "too large" in reply_text(interaction)
 
 
 class TestOtherCommands:
-    async def test_quote_is_sent_by_the_artist_with_action_buttons(self, monkeypatch):
-        monkeypatch.setattr(cog, "php_to_usd", AsyncMock(return_value=None))
+    async def test_quote_is_sent_by_the_artist_with_action_buttons(self):
         interaction, api, channel = _scene(ARTIST_ID, "INTAKE")
+        api.quote.return_value = _commission("QUOTED", quoted_price_usd="26.25")
         cog_instance = CommissionCog(interaction.client)
 
         await cog_instance.quote.callback(cog_instance, interaction, 1500.0, "two characters")
 
-        api.quote.assert_awaited_once_with("commission-uuid", price_php="1500.00", price_usd=None)
+        api.quote.assert_awaited_once_with("commission-uuid", price_php="1500.00")
         assert isinstance(channel.send.await_args.kwargs["view"], QuoteActionsView)
         assert "₱1,500.00" in sent_embeds(channel)[0].description
+        assert "$26.25 USD" in sent_embeds(channel)[0].description
+
+    async def test_quote_without_a_usd_figure_shows_pesos_only(self):
+        interaction, api, channel = _scene(ARTIST_ID, "INTAKE")
+        api.quote.return_value = _commission("QUOTED", quoted_price_usd=None)
+        cog_instance = CommissionCog(interaction.client)
+
+        await cog_instance.quote.callback(cog_instance, interaction, 1500.0, "")
+
+        assert "USD" not in sent_embeds(channel)[0].description
 
     async def test_confirm_tos_reposts_the_terms(self):
         interaction, api, channel = _scene(CLIENT_ID, "TOS_PENDING")

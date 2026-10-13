@@ -15,6 +15,9 @@ from shared.config import settings
 
 Json = dict[str, Any]
 
+# Uploads carry up to 25 MB and are forwarded to storage before the API answers.
+UPLOAD_TIMEOUT_SECONDS = 120.0
+
 
 class APIError(Exception):
     """The API refused the request. `detail` is written for the Discord user."""
@@ -72,15 +75,44 @@ class APIClient:
             path: str,
             *,
             json: Json | None = None,
-            params: Any = None
+            params: Any = None,
+            files: Any = None,
+            data: Json | None = None,
+            timeout: float | None = None
     ) -> Any:
         try:
-            response = await self._http.request(method, path, json=json, params=params)
+            response = await self._http.request(
+                method,
+                path,
+                json=json,
+                params=params,
+                files=files,
+                data=data,
+                **({"timeout": timeout} if timeout is not None else {})
+            )
         except httpx.HTTPError as exc:
             raise APIError(503, "ArtFlow is temporarily unavailable. Please try again") from exc
         if response.status_code >= 400:
             raise APIError(response.status_code, _detail_from(response))
         return response.json()
+
+    async def _upload(
+            self,
+            path: str,
+            filename: str,
+            content: bytes,
+            content_type: str | None,
+            *,
+            data: Json | None = None
+    ) -> Any:
+        """Send a file to the API, which validates, stores and records it."""
+        return await self._request(
+            "POST",
+            path,
+            files={"file": (filename, content, content_type or "application/octet-stream")},
+            data=data,
+            timeout=UPLOAD_TIMEOUT_SECONDS
+        )
 
     # ------------------------------------------------------------------ servers
     async def get_server(self, guild_id: int | str) -> Json:
@@ -256,7 +288,6 @@ class APIClient:
             commission_id: str,
             *,
             price_php: str,
-            price_usd: str | None = None,
             revisions_allowed: int = 2
     ) -> Json:
         return await self._request(
@@ -264,7 +295,6 @@ class APIClient:
             f"/commissions/{commission_id}/quote",
             json={
                 "quoted_price_php": price_php,
-                "quoted_price_usd": price_usd,
                 "currency_used": "PHP",
                 "revisions_allowed": revisions_allowed,
             },
@@ -285,26 +315,48 @@ class APIClient:
             json={"tos_version_hash": tos_hash},
         )
 
-    async def upload_receipt(self, commission_id: str, receipt_key: str) -> Json:
-        return await self._request(
-            "POST",
-            f"/commissions/{commission_id}/receipt",
-            json={"payment_receipt_key": receipt_key},
+    async def upload_receipt(
+            self,
+            commission_id: str,
+            *,
+            filename: str,
+            content: bytes,
+            content_type: str | None
+    ) -> Json:
+        return await self._upload(
+            f"/commissions/{commission_id}/receipt", filename, content, content_type
         )
 
     async def confirm_payment(self, commission_id: str) -> Json:
         return await self._request("POST", f"/commissions/{commission_id}/confirm-payment")
 
-    async def post_wip(self, commission_id: str, image_key: str, note: str | None = None) -> Json:
-        return await self._request(
-            "POST",
+    async def post_wip(
+            self,
+            commission_id: str,
+            *,
+            filename: str,
+            content: bytes,
+            content_type: str | None,
+            note: str | None = None
+    ) -> Json:
+        return await self._upload(
             f"/commissions/{commission_id}/wip-update",
-            json={"image_key": image_key, "artist_note": note},
+            filename,
+            content,
+            content_type,
+            data={"note": note} if note else None
         )
 
-    async def deliver(self, commission_id: str, file_key: str) -> Json:
-        return await self._request(
-            "POST", f"/commissions/{commission_id}/deliver", json={"file_key": file_key}
+    async def deliver(
+            self,
+            commission_id: str,
+            *,
+            filename: str,
+            content: bytes,
+            content_type: str | None
+    ) -> Json:
+        return await self._upload(
+            f"/commissions/{commission_id}/deliver", filename, content, content_type
         )
 
     async def complete(self, commission_id: str) -> Json:

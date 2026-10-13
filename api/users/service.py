@@ -66,13 +66,6 @@ async def upsert_user(
     return user
 
 
-async def verify_email(db: AsyncSession, *, discord_user_id: str) -> User:
-    user = await require_user_by_discord_id(db, discord_user_id)
-    user.is_email_verified = True
-    await db.flush()
-    return user
-
-
 async def submit_18_verification(
         db: AsyncSession,
         redis: Redis,

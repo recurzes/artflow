@@ -4,7 +4,6 @@ import io
 import logging
 import re
 from datetime import datetime, timezone
-from decimal import Decimal
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -38,8 +37,6 @@ from bot.utils.uploads import (
     download,
     is_image,
 )
-from shared.exchange_rates import php_to_usd
-from shared.storage import upload_delivery_file, upload_receipt, upload_wip_image
 
 logger = logging.getLogger(__name__)
 
@@ -806,12 +803,7 @@ class CommissionCog(commands.Cog, name="Commissions"):
         await interaction.response.defer(ephemeral=True)
         try:
             comm = await ticket_commission(interaction, only="artist", action="send a quote")
-            usd = await php_to_usd(Decimal(str(amount)))
-            await self.bot.api.quote(
-                comm["id"],
-                price_php=f"{amount:.2f}",
-                price_usd=str(usd) if usd is not None else None
-            )
+            quoted = await self.bot.api.quote(comm["id"], price_php=f"{amount:.2f}")
         except TicketError as exc:
             await reply_error(interaction, str(exc))
             return
@@ -820,8 +812,9 @@ class CommissionCog(commands.Cog, name="Commissions"):
             return
 
         desc = f"**₱{amount:,.2f} PHP**"
+        usd = _float_or_none(quoted.get("quoted_price_usd"))
         if usd is not None:
-            desc += f" (~${float(usd):,.2f} USD)"
+            desc += f" (~${usd:,.2f} USD)"
         if notes:
             desc += f"\n\n{notes}"
         await interaction.channel.send(
@@ -895,8 +888,8 @@ class CommissionCog(commands.Cog, name="Commissions"):
             await reply_error(interaction, str(exc))
             return
 
-        # Checked here as well as by the API, so nothing is stored for a request
-        # that is going to be refused.
+        # The API enforces all of this; checking here first saves downloading and
+        # sending a file that is going to be refused.
         if comm["status"] != "PAYMENT_PENDING":
             await reply_error(
                 interaction,
@@ -915,14 +908,14 @@ class CommissionCog(commands.Cog, name="Commissions"):
 
         try:
             raw = await receipt.read()
-            key = await upload_receipt(raw, receipt.filename, str(comm["id"]))
-            await self.bot.api.upload_receipt(comm["id"], key)
+            await self.bot.api.upload_receipt(
+                comm["id"],
+                filename=receipt.filename,
+                content=raw,
+                content_type=receipt.content_type
+            )
         except APIError as exc:
             await reply_error(interaction, exc.detail)
-            return
-        except Exception:
-            logger.exception("Could not store the receipt for commission %s", comm["id"])
-            await reply_error(interaction, "The receipt could not be stored. Please try again")
             return
 
         embed = success_embed(
@@ -998,14 +991,15 @@ class CommissionCog(commands.Cog, name="Commissions"):
 
         try:
             raw = await image.read()
-            key = await upload_wip_image(raw, image.filename, str(comm["id"]), watermarked=False)
-            await self.bot.api.post_wip(comm["id"], key, note or None)
+            await self.bot.api.post_wip(
+                comm["id"],
+                filename=image.filename,
+                content=raw,
+                content_type=image.content_type,
+                note=note or None
+            )
         except APIError as exc:
             await reply_error(interaction, exc.detail)
-            return
-        except Exception:
-            logger.exception("Could not store the WIP image for commission %s", comm["id"])
-            await reply_error(interaction, "The image could not be stored. Please try again")
             return
 
         # The image itself is posted in the ticket, so the client sees it here.
@@ -1056,14 +1050,14 @@ class CommissionCog(commands.Cog, name="Commissions"):
 
         try:
             raw = await file.read()
-            key = await upload_delivery_file(raw, file.filename, str(comm["id"]))
-            delivered = await self.bot.api.deliver(comm["id"], key)
+            delivered = await self.bot.api.deliver(
+                comm["id"],
+                filename=file.filename,
+                content=raw,
+                content_type=file.content_type
+            )
         except APIError as exc:
             await reply_error(interaction, exc.detail)
-            return
-        except Exception:
-            logger.exception("Could not store the delivery for commission %s", comm["id"])
-            await reply_error(interaction, "The file could not be stored. Please try again")
             return
 
         auto_accept = _discord_time(delivered.get("delivery_auto_accept_at"))

@@ -9,7 +9,7 @@ import pytest
 
 from shared.models.artist import ArtistStatus
 from shared.models.commission import CommissionStatus
-from tests.factories import make_artist, make_commission, make_server, make_user
+from tests.factories import PNG, make_artist, make_commission, make_server, make_user
 
 S = CommissionStatus
 TOS_TEXT = "No refunds after the sketch is approved."
@@ -119,31 +119,31 @@ class TestCreate:
 # ---------------------------------------------------------------------------
 # The state machine
 # ---------------------------------------------------------------------------
-# action -> (path suffix, JSON body, statuses it is allowed from, resulting status)
-ACTIONS: dict[str, tuple[str, dict | None, set[S], S | None]] = {
+# action -> (path suffix, request arguments, statuses it is allowed from, resulting status)
+ACTIONS: dict[str, tuple[str, dict, set[S], S]] = {
     "ticket": (
-        "ticket", {"discord_ticket_channel_id": "123456789012345678"}, {S.INQUIRY}, S.INTAKE
+        "ticket",
+        {"json": {"discord_ticket_channel_id": "123456789012345678"}},
+        {S.INQUIRY},
+        S.INTAKE,
     ),
-    "intake": ("intake", {"notes": "A portrait of my cat"}, {S.INTAKE}, S.INTAKE),
-    "quote": ("quote", {"quoted_price_php": "1500.00"}, {S.INTAKE}, S.QUOTED),
-    "counter-offer": ("counter-offer", {"notes": "Can you do 1200?"}, {S.QUOTED}, S.INTAKE),
-    "accept-quote": ("accept-quote", None, {S.QUOTED}, S.TOS_PENDING),
+    "intake": ("intake", {"json": {"notes": "A portrait of my cat"}}, {S.INTAKE}, S.INTAKE),
+    "quote": ("quote", {"json": {"quoted_price_php": "1500.00"}}, {S.INTAKE}, S.QUOTED),
+    "counter-offer": (
+        "counter-offer", {"json": {"notes": "Can you do 1200?"}}, {S.QUOTED}, S.INTAKE
+    ),
+    "accept-quote": ("accept-quote", {}, {S.QUOTED}, S.TOS_PENDING),
     "tos-accept": (
-        "tos-accept", {"tos_version_hash": TOS_HASH}, {S.TOS_PENDING}, S.PAYMENT_PENDING
+        "tos-accept", {"json": {"tos_version_hash": TOS_HASH}}, {S.TOS_PENDING}, S.PAYMENT_PENDING
     ),
-    "receipt": (
-        "receipt",
-        {"payment_receipt_key": "receipts/abc.png"},
-        {S.PAYMENT_PENDING},
-        S.PAYMENT_PENDING,
-    ),
-    "confirm-payment": ("confirm-payment", None, {S.PAYMENT_PENDING}, S.IN_PROGRESS),
-    "wip-update": ("wip-update", {"image_key": "wip/abc.png"}, {S.IN_PROGRESS, S.WIP}, S.WIP),
-    "deliver": ("deliver", {"file_key": "wip/final.png"}, {S.WIP}, S.DELIVERED),
-    "complete": ("complete", None, {S.DELIVERED}, S.COMPLETED),
+    "receipt": ("receipt", {"files": {"file": PNG}}, {S.PAYMENT_PENDING}, S.PAYMENT_PENDING),
+    "confirm-payment": ("confirm-payment", {}, {S.PAYMENT_PENDING}, S.IN_PROGRESS),
+    "wip-update": ("wip-update", {"files": {"file": PNG}}, {S.IN_PROGRESS, S.WIP}, S.WIP),
+    "deliver": ("deliver", {"files": {"file": PNG}}, {S.WIP}, S.DELIVERED),
+    "complete": ("complete", {}, {S.DELIVERED}, S.COMPLETED),
     "cancel": (
         "cancel",
-        None,
+        {},
         {S.INQUIRY, S.INTAKE, S.QUOTED, S.TOS_PENDING, S.PAYMENT_PENDING},
         S.CANCELLED,
     ),
@@ -152,12 +152,14 @@ ACTIONS: dict[str, tuple[str, dict | None, set[S], S | None]] = {
 
 @pytest.mark.parametrize("action", ACTIONS)
 @pytest.mark.parametrize("status", list(S))
-async def test_each_action_is_only_possible_from_its_own_status(client, db, status, action):
-    suffix, body, allowed_from, result = ACTIONS[action]
+async def test_each_action_is_only_possible_from_its_own_status(
+        client, db, stored_files, status, action
+):
+    suffix, request, allowed_from, result = ACTIONS[action]
     artist = await make_artist(db, tos_text=TOS_TEXT)
     commission = await make_commission(db, artist=artist, status=status)
 
-    response = await client.post(f"/commissions/{commission.id}/{suffix}", json=body)
+    response = await client.post(f"/commissions/{commission.id}/{suffix}", **request)
 
     if status in allowed_from:
         assert response.status_code == 200, response.text
@@ -165,6 +167,7 @@ async def test_each_action_is_only_possible_from_its_own_status(client, db, stat
     else:
         assert response.status_code == 409, response.text
         assert (await client.get(f"/commissions/{commission.id}")).json()["status"] == status.value
+        assert stored_files == []  # a refused action stores nothing
 
 
 async def test_there_is_no_generic_status_endpoint(client, db):
@@ -244,7 +247,7 @@ async def test_deliver_before_any_wip_explains_what_to_do(client, db):
     commission = await make_commission(db, status=S.IN_PROGRESS)
 
     response = await client.post(
-        f"/commissions/{commission.id}/deliver", json={"file_key": "wip/final.png"}
+        f"/commissions/{commission.id}/deliver", files={"file": PNG}
     )
 
     assert response.status_code == 409

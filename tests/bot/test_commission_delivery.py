@@ -76,15 +76,6 @@ def _scene(user_id: int, status: str, **commission_fields):
     return interaction, api, ticket, showcase, reviews
 
 
-@pytest.fixture
-def storage(monkeypatch):
-    wip = AsyncMock(return_value="wip/commission-uuid/original/a.png")
-    final = AsyncMock(return_value="wip/commission-uuid/final/b.png")
-    monkeypatch.setattr(cog, "upload_wip_image", wip)
-    monkeypatch.setattr(cog, "upload_delivery_file", final)
-    return wip, final
-
-
 def test_attached_files_get_a_name_an_embed_can_reference():
     file, name = _attached(b"x", "My Sketch (v2).PNG", "wip")
     assert name == "wip.png"
@@ -98,41 +89,45 @@ class TestWip:
         cog_instance = CommissionCog(interaction.client)
         await cog_instance.wip.callback(cog_instance, interaction, attachment, note)
 
-    async def test_the_client_sees_the_image_in_the_ticket(self, storage):
+    async def test_the_client_sees_the_image_in_the_ticket(self):
         interaction, api, ticket, _, _ = _scene(ARTIST_ID, "IN_PROGRESS")
 
         await self._wip(interaction, _attachment())
 
         api.post_wip.assert_awaited_once_with(
-            "commission-uuid", "wip/commission-uuid/original/a.png", "first sketch"
+            "commission-uuid",
+            filename="My Sketch (v2).PNG",
+            content=b"image-bytes",
+            content_type="image/png",
+            note="first sketch",
         )
         sent = ticket.send.await_args.kwargs
         assert sent["file"].filename == "wip.png"
         assert sent["embed"].image.url == "attachment://wip.png"
         assert sent["content"] == f"<@{CLIENT_ID}>"
 
-    async def test_nothing_is_stored_before_payment(self, storage):
+    async def test_nothing_is_stored_before_payment(self):
         interaction, api, ticket, _, _ = _scene(ARTIST_ID, "PAYMENT_PENDING")
 
         await self._wip(interaction, _attachment())
 
-        storage[0].assert_not_awaited()
+        api.post_wip.assert_not_awaited()
         ticket.send.assert_not_awaited()
         assert "once payment is confirmed" in reply_text(interaction)
 
-    async def test_only_images_are_accepted(self, storage):
+    async def test_only_images_are_accepted(self):
         interaction, api, _, _, _ = _scene(ARTIST_ID, "WIP")
 
         await self._wip(interaction, _attachment("notes.pdf", content_type="application/pdf"))
 
-        storage[0].assert_not_awaited()
+        api.post_wip.assert_not_awaited()
 
-    async def test_only_the_artist_can_post(self, storage):
+    async def test_only_the_artist_can_post(self):
         interaction, api, _, _, _ = _scene(CLIENT_ID, "WIP")
 
         await self._wip(interaction, _attachment())
 
-        storage[0].assert_not_awaited()
+        api.post_wip.assert_not_awaited()
         assert "Only the artist" in reply_text(interaction)
 
 
@@ -141,7 +136,7 @@ class TestDeliver:
         cog_instance = CommissionCog(interaction.client)
         await cog_instance.deliver.callback(cog_instance, interaction, attachment)
 
-    async def test_the_final_file_is_posted_with_the_auto_accept_time(self, storage):
+    async def test_the_final_file_is_posted_with_the_auto_accept_time(self):
         interaction, api, ticket, _, _ = _scene(ARTIST_ID, "WIP")
         api.deliver.return_value = _commission(
             "DELIVERED", delivery_auto_accept_at="2026-10-14T12:00:00Z"
@@ -150,14 +145,17 @@ class TestDeliver:
         await self._deliver(interaction, _attachment("final.png"))
 
         api.deliver.assert_awaited_once_with(
-            "commission-uuid", "wip/commission-uuid/final/b.png"
+            "commission-uuid",
+            filename="final.png",
+            content=b"image-bytes",
+            content_type="image/png",
         )
         sent = ticket.send.await_args.kwargs
         assert sent["file"].filename == "final.png"
         assert "/complete" in sent["embed"].description
         assert "<t:" in sent["embed"].description
 
-    async def test_any_file_type_can_be_delivered(self, storage):
+    async def test_any_file_type_can_be_delivered(self):
         interaction, api, ticket, _, _ = _scene(ARTIST_ID, "WIP")
         api.deliver.return_value = _commission("DELIVERED")
 
@@ -167,12 +165,12 @@ class TestDeliver:
         assert sent["file"].filename == "final.zip"
         assert not sent["embed"].image  # nothing to preview
 
-    async def test_delivery_needs_a_wip_first(self, storage):
+    async def test_delivery_needs_a_wip_first(self):
         interaction, api, _, _, _ = _scene(ARTIST_ID, "IN_PROGRESS")
 
         await self._deliver(interaction, _attachment())
 
-        storage[1].assert_not_awaited()
+        api.deliver.assert_not_awaited()
         assert "/wip" in reply_text(interaction)
 
 
