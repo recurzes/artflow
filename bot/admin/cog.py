@@ -57,7 +57,7 @@ class AdminGroup(
                     f"**Active commissions:** {st.get('active_commissions', 0)}\n"
                     f"**Completed today:** {st.get('completed_today', 0)}\n"
                     "**Platform fees (PHP) this month:** "
-                    f"{st.get('revenue_php_this_month', 0):,.2f}"
+                    f"{float(st.get('revenue_php_this_month') or 0):,.2f}"
                 )
             ),
             ephemeral=True

@@ -8,7 +8,7 @@ figure.
 """
 import logging
 import time
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 import httpx
 
@@ -27,7 +27,7 @@ async def php_to_usd(amount_php: Decimal) -> Decimal | None:
     rate = await _usd_per_php()
     if rate is None:
         return None
-    return (amount_php * rate).quantize(Decimal("0.01"))
+    return (amount_php * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 async def _usd_per_php() -> Decimal | None:

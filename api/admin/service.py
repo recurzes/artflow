@@ -14,8 +14,10 @@ async def get_stats(db: AsyncSession, server_id: uuid.UUID) -> AdminStats:
     return AdminStats(
         active_commissions=await repository.count_active_commissions(db, server_id),
         completed_today=await repository.count_completed_since(db, server_id, start_of_day),
-        revenue_php_this_month=float(
-            await repository.sum_platform_fees_since(db, server_id, start_of_month)
+        revenue_php_this_month=await repository.sum_platform_fees_since(
+            db,
+            server_id,
+            start_of_month
         ),
     )
 

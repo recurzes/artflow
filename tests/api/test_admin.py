@@ -40,7 +40,7 @@ async def test_stats_count_only_this_servers_commissions(client, db):
     assert response.json() == {
         "active_commissions": 2,
         "completed_today": 1,
-        "revenue_php_this_month": 45.0,
+        "revenue_php_this_month": "45.00",
     }
 
 

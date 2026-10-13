@@ -1,6 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, false
@@ -90,8 +91,8 @@ class Commission(Base, TimestampMixin):
     client_intake_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Pricing
-    quoted_price_php: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
-    quoted_price_usd: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    quoted_price_php: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    quoted_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     currency_used: Mapped[CurrencyUsed | None] = mapped_column(nullable=True)
 
     # TOS
@@ -155,7 +156,7 @@ class Commission(Base, TimestampMixin):
     )
 
     # 3% platform fee
-    platform_fee_php: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    platform_fee_php: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
 
 
     # Relationships

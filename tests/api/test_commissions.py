@@ -391,3 +391,25 @@ async def test_lookup_by_ticket_channel(client, db):
 
     missing = await client.get("/commissions/by-discord-channel/1")
     assert missing.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("quoted", "fee"),
+    [("1500.00", "45.00"), ("1234.56", "37.04"), ("0.50", "0.02"), ("999.99", "30.00")],
+)
+async def test_money_is_exact_to_the_centavo(client, db, quoted, fee):
+    """Amounts round-trip as decimals; the 3% fee is rounded half-up, not truncated."""
+    commission = await make_commission(db, status=S.INTAKE)
+    await client.post(
+        f"/commissions/{commission.id}/quote",
+        headers=as_artist(commission),
+        json={"quoted_price_php": quoted},
+    )
+    stored = (await client.get(f"/commissions/{commission.id}")).json()
+    assert stored["quoted_price_php"] == quoted
+
+    done = await make_commission(db, status=S.DELIVERED, quoted_price_php=quoted)
+    completed = await client.post(
+        f"/commissions/{done.id}/complete", headers=as_client(done)
+    )
+    assert completed.json()["platform_fee_php"] == fee

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,7 @@ from shared.models.wip_update import WipUpdate
 PAYMENT_WINDOW_HOURS = 24
 DELIVERY_AUTO_ACCEPT_HOURS = 48
 PLATFORM_FEE_RATE = Decimal("0.03")
+CENTAVO = Decimal("0.01")
 
 # The whole lifecycle. Every status change in the codebase goes through _transition,
 # so a move that is not listed here cannot happen.
@@ -105,11 +106,10 @@ def mark_completed(comm: Commission) -> None:
     """Move to COMPLETED and record the completion time and platform fee."""
     _transition(comm, CommissionStatus.COMPLETED)
     comm.completed_at = _utcnow()
-    if comm.quoted_price_php is not None:
-        fee = (Decimal(str(comm.quoted_price_php)) * PLATFORM_FEE_RATE).quantize(Decimal("0.01"))
-        comm.platform_fee_php = float(fee)
-    else:
-        comm.platform_fee_php = None
+    comm.platform_fee_php = (
+        (comm.quoted_price_php * PLATFORM_FEE_RATE).quantize(CENTAVO, rounding=ROUND_HALF_UP)
+        if comm.quoted_price_php is not None else None
+    )
 
 
 def mark_disputed(comm: Commission) -> None:
@@ -261,8 +261,8 @@ async def apply_quote(
     _require_party(comm, actor, "artist", "send a quote")
     _require_status(comm, CommissionStatus.INTAKE, action="Quoting")
 
-    comm.quoted_price_php = float(quote.quoted_price_php)
-    comm.quoted_price_usd = float(price_usd) if price_usd is not None else None
+    comm.quoted_price_php = quote.quoted_price_php
+    comm.quoted_price_usd = price_usd
     comm.currency_used = quote.currency_used
     comm.revisions_allowed = quote.revisions_allowed
     if quote.deadline_at is not None:

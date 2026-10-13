@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import discord
@@ -100,8 +101,8 @@ class ArtistApplyModal(discord.ui.Modal, title="ArtFlow — Artist Application")
                 display_name=self.display_name.value.strip(),
                 styles=style_list,
                 social_links=social_links,
-                price_min_php=price_min,
-                price_max_php=price_max,
+                price_min_php=str(price_min) if price_min is not None else None,
+                price_max_php=str(price_max) if price_max is not None else None,
                 gcash_number=gcash,
                 paypal_email=paypal
             )
@@ -360,14 +361,15 @@ def _float_or_none(value: Any) -> float | None:
     return None if value is None else float(value)
 
 
-def _parse_price_range(value: str) -> tuple[float | None, float | None]:
+def _parse_price_range(value: str) -> tuple[Decimal | None, Decimal | None]:
+    """"500 - 3,000" -> (500, 3000). Decimal, not float: these are amounts of money."""
     try:
         parts = [p.strip().replace(",", "") for p in value.replace("–", "-").split("-")]
         if len(parts) == 2:
-            return float(parts[0]), float(parts[1])
+            return Decimal(parts[0]), Decimal(parts[1])
         elif len(parts) == 1:
-            return float(parts[0]), None
-    except (ValueError, IndexError):
+            return Decimal(parts[0]), None
+    except (InvalidOperation, IndexError):
         pass
 
     return None, None
