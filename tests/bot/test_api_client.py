@@ -40,7 +40,7 @@ async def _setup(api: APIClient) -> tuple[dict, dict, dict, dict]:
     artist = await api.approve_artist(application["id"], moderator=make_discord_id())
     assert artist["status"] == "ACTIVE"
     artist_user = await api.get_user(artist_discord_id)
-    artist = await api.update_artist(artist["id"], tos_text=TOS)
+    artist = await api.update_artist(artist["id"], actor=artist_discord_id, tos_text=TOS)
     return server, artist_user, buyer, artist
 
 
@@ -88,6 +88,16 @@ async def test_artists(bot_api):
     assert await bot_api.list_artists(server["id"], nsfw_only=True) == []
 
     assert await bot_api.get_artist_capacity(artist["id"]) == {"count": 0, "max": 5}
+
+    closed = await bot_api.set_artist_availability(
+        artist["id"], actor=artist_user["discord_user_id"], open=False
+    )
+    assert closed["status"] == "INACTIVE"
+    assert await bot_api.list_artists(server["id"]) == []
+    reopened = await bot_api.set_artist_availability(
+        artist["id"], actor=artist_user["discord_user_id"], open=True
+    )
+    assert reopened["status"] == "ACTIVE"
 
     # A second applicant is turned down.
     other = await bot_api.apply_as_artist(

@@ -43,10 +43,13 @@ class ArtistUpdate(BaseModel):
     price_max_php: Decimal | None = None
     nsfw_enabled: bool | None = None
     max_active_commissions: int | None = None
-    status: ArtistStatus | None = None
     tos_text: str | None = None
     gcash_number: str | None = None
     paypal_email: str | None = None
+
+
+class ArtistAvailability(BaseModel):
+    open: bool
 
 
 class ArtistRead(TimestampSchema):

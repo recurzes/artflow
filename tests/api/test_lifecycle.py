@@ -62,7 +62,9 @@ class Scene:
             {"moderator_discord_user_id": make_discord_id()},
         )
         response = await self.client.patch(
-            f"/artists/{self.artist['id']}", json={"tos_text": TOS}
+            f"/artists/{self.artist['id']}",
+            headers=acting(self.artist["discord_user_id"]),
+            json={"tos_text": TOS},
         )
         assert response.status_code == 200, response.text
         self.artist = response.json()
@@ -224,7 +226,9 @@ async def test_dispute_freezes_the_commission_until_resolved(client):
 async def test_artist_at_capacity_frees_a_slot_when_a_commission_ends(client):
     scene = await Scene(client).build()
     response = await client.patch(
-        f"/artists/{scene.artist['id']}", json={"max_active_commissions": 1}
+        f"/artists/{scene.artist['id']}",
+        headers=acting(scene.artist["discord_user_id"]),
+        json={"max_active_commissions": 1},
     )
     assert response.status_code == 200
     await scene.advance_to_in_progress()
