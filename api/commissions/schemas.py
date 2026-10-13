@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.common import TimestampSchema
+from api.common import DiscordId, Money, PositiveMoney, TimestampSchema
 from shared.models.commission import CommissionStatus, CurrencyUsed, PaymentMethod
 
 
@@ -14,28 +14,28 @@ class CommissionCreate(BaseModel):
     server_id: uuid.UUID
     artist_id: uuid.UUID
     client_id: uuid.UUID
-    commission_type: str | None = None
+    commission_type: str | None = Field(default=None, max_length=100)
     is_nsfw: bool = False
     deadline_at: datetime | None = None
 
 
 class TicketOpenBody(BaseModel):
-    discord_ticket_channel_id: str = Field(min_length=1, max_length=20)
+    discord_ticket_channel_id: DiscordId
 
 
 class QuoteCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    quoted_price_php: Decimal
-    quoted_price_usd: Decimal | None = None
+    quoted_price_php: PositiveMoney
+    quoted_price_usd: Money | None = None
     currency_used: CurrencyUsed = CurrencyUsed.PHP
-    revisions_allowed: int = 2
+    revisions_allowed: int = Field(default=2, ge=0, le=20)
     deadline_at: datetime | None = None
 
 
 class TosAcceptBody(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    tos_version_hash: str
+    tos_version_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class IntakeSubmitBody(BaseModel):
@@ -45,7 +45,7 @@ class IntakeSubmitBody(BaseModel):
 
 class CounterOfferBody(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    notes: str = ""
+    notes: str = Field(default="", max_length=2000)
 
 
 class CommissionRead(TimestampSchema):

@@ -1,13 +1,13 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
-from api.common import TimestampSchema
+from api.common import DiscordId, TimestampSchema
 
 
 class UserCreate(BaseModel):
-    discord_user_id: str = Field(min_length=1, max_length=20)
+    discord_user_id: DiscordId
     discord_account_created_at: datetime | None = None
 
 class UserRead(TimestampSchema):
@@ -24,7 +24,7 @@ class UserRead(TimestampSchema):
 class Verify18Submit(BaseModel):
     model_config = {"from_attributes": False}
 
-    discord_user_id: str = Field(min_length=1, max_length=20)
+    discord_user_id: DiscordId
     discord_account_created_at: datetime | None = None
 
 
@@ -37,4 +37,4 @@ class Verify18Response(BaseModel):
 
 
 class Verify18ApproveBody(BaseModel):
-    discord_user_id: str = Field(min_length=1, max_length=20)
+    discord_user_id: DiscordId

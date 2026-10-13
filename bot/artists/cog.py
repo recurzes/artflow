@@ -142,7 +142,11 @@ class ArtistCog(commands.Cog, name="Artists"):
         description="Set or update your commission Terms of Service text"
     )
     @app_commands.describe(text="Full TOS text shown to clients before payment")
-    async def settings_tos(self, interaction: discord.Interaction, text: str) -> None:
+    async def settings_tos(
+            self,
+            interaction: discord.Interaction,
+            text: app_commands.Range[str, 1, 6000]
+    ) -> None:
         await interaction.response.defer(ephemeral=True)
         guild = interaction.guild
         if guild is None:

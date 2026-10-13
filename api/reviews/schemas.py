@@ -9,7 +9,7 @@ class ReviewCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     rating: int = Field(ge=1, le=5)
-    body: str | None = None
+    body: str | None = Field(default=None, max_length=2000)
     is_public: bool = True
 
 
