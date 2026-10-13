@@ -7,11 +7,11 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.shared import layout
 from bot.shared.api_client import APIError
 from bot.shared.embeds import base_embed, error_embed, success_embed, warning_embed
 from bot.shared.permissions import is_staff
 from bot.shared.replies import reply_error, reply_success
-from shared.discord_layout import CHANNEL_VERIFICATION_QUEUE, ROLE_18_VERIFIED
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ AGE_APPROVE_BUTTON_ID = "artflow:age_approve"
 
 
 async def grant_18_role(member: discord.Member, *, reason: str) -> None:
-    role = discord.utils.get(member.guild.roles, name=ROLE_18_VERIFIED)
+    role = layout.role(member.guild, "role_18_verified")
     me = member.guild.me
     if role is None or me is None or role >= me.top_role:
         logger.warning("Cannot assign the 18+ role in %s (missing, or above my role)", member.guild)
@@ -36,7 +36,7 @@ async def queue_for_review(member: discord.Member) -> bool:
 
     Returns False when the server has no verification queue to post it in.
     """
-    queue = discord.utils.get(member.guild.text_channels, name=CHANNEL_VERIFICATION_QUEUE)
+    queue = layout.channel(member.guild, "channel_verification_queue")
     if queue is None:
         logger.warning("verification-queue channel not found in %s", member.guild.name)
         return False

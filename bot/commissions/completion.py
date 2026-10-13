@@ -19,6 +19,7 @@ from bot.commissions.tickets import (
     close_ticket,
     ticket_commission,
 )
+from bot.shared import layout
 from bot.shared.api_client import APIError
 from bot.shared.embeds import (
     completed_work_embed,
@@ -31,19 +32,6 @@ from bot.shared.uploads import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _settings_channel(
-        guild: discord.Guild,
-        settings: dict[str, Any],
-        key: str
-) -> discord.TextChannel | None:
-    """A channel the server configured by ID, if it still exists."""
-    channel_id = settings.get(key)
-    if not channel_id:
-        return None
-    channel = guild.get_channel(int(channel_id))
-    return channel if isinstance(channel, discord.TextChannel) else None
 
 
 async def _showcase_file(api: Any, comm: dict[str, Any]) -> discord.File | None:
@@ -86,8 +74,7 @@ async def announce_completed(
     if comm.get("is_nsfw"):
         return
     try:
-        server = await api.get_server(guild.id)
-        showcase = _settings_channel(guild, server.get("settings") or {}, "channel_completed_works")
+        showcase = layout.channel(guild, "channel_completed_works")
         if showcase is None:
             return
         artist = await api.get_artist(comm["artist_id"])
@@ -123,10 +110,7 @@ async def submit_review(
         return
     # The review is saved; failing to publish it must not look like a failed review.
     try:
-        server = await api.get_server(interaction.guild.id)
-        reviews = _settings_channel(
-            interaction.guild, server.get("settings") or {}, "channel_reviews"
-        )
+        reviews = layout.channel(interaction.guild, "channel_reviews")
         if reviews is None:
             return
         artist = await api.get_artist(comm["artist_id"])

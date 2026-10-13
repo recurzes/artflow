@@ -12,17 +12,14 @@ from bot.artists.applications import (
     ArtistApplyModal,
     RejectApplicationButton,
 )
+from bot.shared import layout
 from bot.shared.api_client import APIError
 from bot.shared.embeds import (
     base_embed,
     error_embed,
     success_embed,
 )
-from bot.shared.permissions import has_role
 from shared.discord_layout import (
-    CHANNEL_COMMISSIONS_OPEN,
-    ROLE_18_VERIFIED,
-    ROLE_VERIFIED_ARTIST,
     SHOWCASE_BY_SLUG,
 )
 
@@ -78,13 +75,13 @@ class ArtistCog(commands.Cog, name="Artists"):
             )
             return
 
-        if not has_role(interaction.user, ROLE_VERIFIED_ARTIST):
+        if not layout.has_role(interaction.user, "role_verified_artist"):
             await interaction.followup.send(
                 embed=error_embed("Only verified artists can post to the showcase channels"),
                 ephemeral=True
             )
             return
-        if category == "nsfw" and not has_role(interaction.user, ROLE_18_VERIFIED):
+        if category == "nsfw" and not layout.has_role(interaction.user, "role_18_verified"):
             await interaction.followup.send(
                 embed=error_embed("You need 18+ verification to post to the NSFW showcase"),
                 ephemeral=True
@@ -240,7 +237,7 @@ class ArtistCog(commands.Cog, name="Artists"):
             return
 
         # Post to #commissions-open channel
-        channel = discord.utils.get(interaction.guild.channels, name=CHANNEL_COMMISSIONS_OPEN)
+        channel = layout.channel(interaction.guild, "channel_commissions_open")
         if channel and open_status:
             embed = base_embed(
                 title=f"{interaction.user.display_name} is OPEN for Commissions!",

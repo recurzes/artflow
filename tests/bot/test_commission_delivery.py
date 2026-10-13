@@ -10,6 +10,7 @@ from bot.commissions import completion
 from bot.commissions.cog import CommissionCog
 from bot.commissions.completion import ReviewPromptView, announce_completed, submit_review
 from bot.commissions.formatting import attached
+from bot.shared import layout
 from bot.shared.api_client import APIError
 from tests.bot.fakes import (
     make_channel,
@@ -55,18 +56,17 @@ def _scene(user_id: int, status: str, **commission_fields):
     api = AsyncMock()
     api.get_commission_for_channel.return_value = _commission(status, **commission_fields)
     api.get_artist.return_value = {"id": "artist-uuid", "display_name": "Mika"}
-    api.get_server.return_value = {
-        "settings": {
-            "channel_completed_works": str(SHOWCASE_ID),
-            "channel_reviews": str(REVIEWS_ID),
-        }
-    }
     ticket = make_channel(5001)
     showcase, reviews = make_channel(SHOWCASE_ID), make_channel(REVIEWS_ID)
     member = make_member(user_id)
     guild = make_guild(member)
     guild.get_channel = lambda channel_id: {SHOWCASE_ID: showcase, REVIEWS_ID: reviews}.get(
         channel_id
+    )
+    # what the bot last learned about this server from the API
+    layout.remember(
+        guild.id,
+        {"channel_completed_works": str(SHOWCASE_ID), "channel_reviews": str(REVIEWS_ID)},
     )
     interaction = make_interaction(member, guild=guild, channel=ticket, api=api)
     return interaction, api, ticket, showcase, reviews
@@ -285,7 +285,7 @@ class TestReview:
 
     async def test_publishing_failure_does_not_undo_the_thanks(self):
         interaction, api, _, _, reviews = _scene(CLIENT_ID, "COMPLETED")
-        api.get_server.side_effect = APIError(503, "unavailable")
+        api.get_artist.side_effect = APIError(503, "unavailable")
 
         await submit_review(interaction, _commission("COMPLETED"), 5, None)
 

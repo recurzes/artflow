@@ -7,6 +7,7 @@ from typing import Any
 
 import discord
 
+from bot.shared import layout
 from bot.shared.api_client import APIError
 from bot.shared.embeds import (
     artist_profile_embed,
@@ -15,11 +16,6 @@ from bot.shared.embeds import (
     warning_embed,
 )
 from bot.shared.permissions import is_staff
-from shared.discord_layout import (
-    CHANNEL_ARTIST_DIRECTORY,
-    CHANNEL_VERIFICATION_QUEUE,
-    ROLE_VERIFIED_ARTIST,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +79,7 @@ class ArtistApplyModal(discord.ui.Modal, title="ArtFlow — Artist Application")
         price_min, price_max = _parse_price_range(self.price_range.value)
         style_list = [s.strip().lower() for s in self.styles.value.split(",") if s.strip()]
 
-        queue_channel = discord.utils.get(guild.text_channels, name=CHANNEL_VERIFICATION_QUEUE)
+        queue_channel = layout.channel(guild, "channel_verification_queue")
         if queue_channel is None:
             logger.warning("verification-queue channel not found in %s", guild.name)
             await interaction.followup.send(
@@ -215,14 +211,14 @@ class ApproveApplicationButton(
             await interaction.followup.send(embed=error_embed(exc.detail), ephemeral=True)
             return
 
-        artist_role = discord.utils.get(guild.roles, name=ROLE_VERIFIED_ARTIST)
+        artist_role = layout.role(guild, "role_verified_artist")
         if artist_role:
             try:
                 await member.add_roles(artist_role, reason="Artist application approved")
             except discord.Forbidden:
                 logger.error("Cannot add Verified Artist role to %s", member)
 
-        directory_channel = discord.utils.get(guild.text_channels, name=CHANNEL_ARTIST_DIRECTORY)
+        directory_channel = layout.channel(guild, "channel_artist_directory")
         if directory_channel:
             intro_embed = artist_profile_embed(
                 display_name=artist["display_name"],

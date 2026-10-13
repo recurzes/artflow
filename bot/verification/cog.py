@@ -4,9 +4,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from bot.shared import layout
 from bot.shared.api_client import APIError
 from bot.shared.embeds import base_embed, error_embed, success_embed
-from shared.discord_layout import ROLE_UNVERIFIED, ROLE_VERIFIED_USER
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class TOSAcceptButton(discord.ui.View):
         member = interaction.user
         guild = interaction.guild
 
-        verified_role = discord.utils.get(guild.roles, name=ROLE_VERIFIED_USER)
+        verified_role = layout.role(guild, "role_verified_user")
         if verified_role and verified_role in member.roles:
             await interaction.followup.send(
                 embed=base_embed("Already Verified", "You are already a verified member."),
@@ -61,7 +61,7 @@ class TOSAcceptButton(discord.ui.View):
             )
             return
 
-        unverified_role = discord.utils.get(guild.roles, name=ROLE_UNVERIFIED)
+        unverified_role = layout.role(guild, "role_unverified")
         try:
             roles_to_add = [verified_role] if verified_role else []
             roles_to_remove = [unverified_role] if unverified_role else []
