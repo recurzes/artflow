@@ -73,3 +73,24 @@ def test_repositories_do_not_call_services(path: Path):
 def test_the_bot_imports_nothing_from_the_api(path: Path):
     offenders = {m for m in _imports(path) if m == "api" or m.startswith("api.")}
     assert not offenders, f"{path.relative_to(ROOT)} imports {sorted(offenders)}"
+
+
+# What the bot may use from the shared package: its own settings and the names
+# of the channels and roles it manages. No database, cache, storage or queue.
+BOT_MAY_IMPORT_FROM_SHARED = ("shared.config", "shared.discord_layout")
+
+
+@pytest.mark.parametrize("path", sorted((ROOT / "bot").rglob("*.py")), ids=str)
+def test_the_bot_reaches_infrastructure_only_through_the_api(path: Path):
+    imports = _imports(path)
+    shared = {
+        m for m in imports
+        if m.split(".")[0] == "shared" and not m.startswith(BOT_MAY_IMPORT_FROM_SHARED)
+    }
+    infrastructure = {
+        m for m in imports
+        if m.split(".")[0] in {"workers", "celery", "redis", "sqlalchemy", "supabase", "asyncpg"}
+    }
+    assert not shared | infrastructure, (
+        f"{path.relative_to(ROOT)} imports {sorted(shared | infrastructure)}"
+    )

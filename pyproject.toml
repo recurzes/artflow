@@ -29,8 +29,6 @@ dependencies = [
     "python-multipart>=0.0.9",
     # Observability
     "sentry-sdk[fastapi,celery]>=2.0",
-    # Rate limiting
-    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

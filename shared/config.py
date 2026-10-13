@@ -27,8 +27,6 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_base_url: str = "http://localhost:8000"
 
-    email_verify_ttl: int = 86400
-
     sentry_dsn: str = ""
 
     # Optional: exchangerate.host key. Without it quotes are shown in PHP only.

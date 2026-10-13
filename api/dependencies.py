@@ -4,20 +4,11 @@ from typing import Annotated
 
 from fastapi import Depends, Header, HTTPException, status
 from redis.asyncio import Redis
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.config import settings
 from shared.db import get_db as _get_db
 from shared.redis import get_redis as _get_redis
-
-# ---------------------------------------------------------------------------
-# Rate limiter for routes the public can reach. Routes behind the bot secret are
-# not limited: every one of those requests comes from the bot's address, so a
-# per-address limit would throttle the bot, not a user.
-# ---------------------------------------------------------------------------
-limiter = Limiter(key_func=get_remote_address)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

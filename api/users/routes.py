@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, status
 
-from api.dependencies import BotAuth, DBSession, RedisClient, limiter
+from api.dependencies import BotAuth, DBSession, RedisClient
 from api.users import service as user_service
 from api.users.schemas import (
     UserCreate,
@@ -25,28 +25,6 @@ async def upsert_user(
         discord_account_created_at=body.discord_account_created_at
     )
     return UserRead.model_validate(user)
-
-
-@router.get("/verify-email", status_code=status.HTTP_200_OK)
-@limiter.limit("5/minute")
-async def verify_email(
-        request: Request,
-        db: DBSession,
-        redis: RedisClient,
-        token: str = Query(..., description="Email verification token from DM Link"),
-) -> dict:
-    redis_key = f"email_verify:{token}"
-    discord_user_id = await redis.get(redis_key)
-
-    if discord_user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Verification token is invalid or has expired"
-        )
-
-    await user_service.verify_email(db, discord_user_id=discord_user_id)
-    await redis.delete(redis_key)
-    return {"message": "Email verified successfully. You can close this tab"}
 
 
 @router.get("/{discord_user_id}", response_model=UserRead)

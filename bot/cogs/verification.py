@@ -1,5 +1,4 @@
 import logging
-import uuid
 
 import discord
 from discord import app_commands
@@ -7,9 +6,7 @@ from discord.ext import commands
 
 from bot.utils.api_client import APIError
 from bot.utils.embeds import base_embed, error_embed, success_embed
-from shared.config import settings
 from shared.discord_layout import ROLE_UNVERIFIED, ROLE_VERIFIED_USER
-from shared.redis import get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -75,49 +72,14 @@ class TOSAcceptButton(discord.ui.View):
         except discord.Forbidden:
             logger.error("Missing permissions to manage roles for %s", member)
 
-        await _send_email_verification_dm(interaction.client, member)
-
         await interaction.followup.send(
             embed=success_embed(
                 "TOS Accepted",
                 "You're now a verified member!\n\n"
-                "Check your DMs — we've sent you an email verification link to complete setup.",
+                "Browse artists and start a commission with `/commission`.",
             ),
             ephemeral=True
         )
-
-
-async def _send_email_verification_dm(bot: commands.Bot, member: discord.Member) -> None:
-    token = str(uuid.uuid4())
-    redis = get_redis()
-
-    try:
-        await redis.setex(
-            f"email_verify:{token}",
-            settings.email_verify_ttl,
-            str(member.id)
-        )
-    except Exception as exc:
-        logger.error("Failed to store email verify token for %s: %s", member.id, exc)
-        return
-    finally:
-        await redis.aclose()
-
-    verify_url = f"{settings.api_base_url}/users/verify-email?token={token}"
-
-    try:
-        embed = base_embed(
-            title="Verify Your Email",
-            description=(
-                "Click the link below to verify your email address.\n"
-                "This link expires in **24 hours**.\n\n"
-                f"[Click here to verify]({verify_url})\n\n"
-                "_If you did not expect this message, you can ignore it._"
-            )
-        )
-        await member.send(embed=embed)
-    except discord.Forbidden:
-        logger.debug("Could not DM email verify link to %s (DMs disabled)", member)
 
 
 class VerificationCog(commands.Cog, name="Verification"):

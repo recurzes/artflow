@@ -4,13 +4,10 @@ import sentry_sdk
 from fastapi import FastAPI
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
 
 from api.admin.routes import router as admin_router
 from api.artists.routes import router as artists_router
 from api.commissions.routes import router as commissions_router
-from api.dependencies import limiter
 from api.disputes.routes import router as disputes_router
 from api.errors import register_error_handlers
 from api.reviews.routes import router as reviews_router
@@ -57,8 +54,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan
     )
 
-    app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     register_error_handlers(app)
 
     app.include_router(users_router)

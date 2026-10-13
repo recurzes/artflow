@@ -1,7 +1,6 @@
 """
 Tests for the /users router.
 """
-import uuid
 from datetime import datetime, timedelta, timezone
 
 from tests.conftest import make_discord_id
@@ -32,36 +31,6 @@ class TestUpsertUser:
 
     async def test_discord_id_is_required(self, client):
         response = await client.post("/users", json={})
-        assert response.status_code == 422
-
-
-# ---------------------------------------------------------------------------
-# GET /users/verify-email
-# ---------------------------------------------------------------------------
-class TestVerifyEmail:
-    async def test_valid_token_verifies_user(self, client, mock_redis):
-        """A valid token in Redis should mark the user's email as verified."""
-        discord_id = make_discord_id()
-        await client.post("/users", json={"discord_user_id": discord_id})
-
-        token = str(uuid.uuid4())
-        # redis-py decodes responses to strings (decode_responses=True in shared/redis.py)
-        mock_redis.get.return_value = discord_id
-
-        response = await client.get(f"/users/verify-email?token={token}")
-        assert response.status_code == 200
-        assert "verified" in response.json()["message"].lower()
-        mock_redis.delete.assert_called_once_with(f"email_verify:{token}")
-
-    async def test_invalid_token_returns_400(self, client, mock_redis):
-        """An unknown token should return 400."""
-        mock_redis.get.return_value = None
-        response = await client.get("/users/verify-email?token=bad-token")
-        assert response.status_code == 400
-
-    async def test_missing_token_returns_422(self, client):
-        """Omitting the token query param entirely should fail validation."""
-        response = await client.get("/users/verify-email")
         assert response.status_code == 422
 
 
