@@ -15,10 +15,11 @@ from typing import Any
 import discord
 from discord.ext import commands, tasks
 
-from bot.cogs.commission import _discord_time, announce_completed
-from bot.utils.api_client import APIError
-from bot.utils.embeds import warning_embed
-from bot.utils.tickets import close_ticket
+from bot.commissions.completion import announce_completed
+from bot.commissions.formatting import discord_time
+from bot.commissions.tickets import close_ticket
+from bot.shared.api_client import APIError
+from bot.shared.embeds import warning_embed
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ async def announce_payment_reminder(bot: commands.Bot, comm: dict[str, Any]) -> 
     channel = _ticket_channel(bot, comm)
     if channel is None:
         return
-    deadline = _discord_time(comm.get("payment_deadline_at")) or "soon"
+    deadline = discord_time(comm.get("payment_deadline_at")) or "soon"
     await channel.send(
         content=f"<@{comm['client_discord_user_id']}>",
         embed=warning_embed(

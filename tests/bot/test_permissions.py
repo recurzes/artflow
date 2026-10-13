@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import discord
 
-from bot.cogs.admin import AdminGroup
-from bot.cogs.artist import ApproveApplicationButton, RejectApplicationButton
+from bot.admin.cog import AdminGroup
+from bot.artists.applications import ApproveApplicationButton, RejectApplicationButton
 from bot.main import ArtflowBot
-from bot.utils.guild_setup import STAFF_ONLY_CHANNELS, _staff_only_overwrites
-from bot.utils.permissions import is_admin, is_staff
+from bot.servers.provisioning import STAFF_ONLY_CHANNELS, _staff_only_overwrites
+from bot.shared.permissions import is_admin, is_staff
 from shared.discord_layout import CHANNEL_ADMIN_LOGS, CHANNEL_VERIFICATION_QUEUE, ROLE_MODERATOR
 
 

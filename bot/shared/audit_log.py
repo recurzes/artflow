@@ -5,7 +5,7 @@ from typing import Any
 
 import discord
 
-from bot.utils.embeds import base_embed
+from bot.shared.embeds import base_embed
 from shared.discord_layout import CHANNEL_ADMIN_LOGS
 
 logger = logging.getLogger(__name__)

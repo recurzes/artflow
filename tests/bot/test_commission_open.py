@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 import discord
 import pytest
 
-from bot.cogs import commission as cog
-from bot.cogs.commission import ArtistPickView, IntakeOpenView, open_commission_ticket
-from bot.utils.api_client import APIError
+from bot.commissions import opening
+from bot.commissions.opening import ArtistPickView, IntakeOpenView, open_commission_ticket
+from bot.shared.api_client import APIError
 from tests.bot.fakes import make_channel, make_guild, make_interaction, make_member, reply_text
 
 ARTIST = {"id": "artist-uuid", "display_name": "Mika", "discord_user_id": "2002", "styles": []}
@@ -68,7 +68,7 @@ class TestOpenCommissionTicket:
         api.upsert_user.return_value = {"id": "buyer-uuid"}
         api.create_commission.return_value = {"id": "commission-uuid"}
         create_channel = AsyncMock(return_value=channel)
-        monkeypatch.setattr(cog, "create_commission_ticket", create_channel)
+        monkeypatch.setattr(opening, "create_commission_ticket", create_channel)
         interaction = make_interaction(buyer, guild=make_guild(buyer, artist_member), api=api)
         return interaction, api, channel, create_channel
 

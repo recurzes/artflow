@@ -3,7 +3,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from bot.utils.guild_setup import provision_artflow_guild
+from bot.servers.provisioning import provision_artflow_guild
 
 logger = logging.getLogger(__name__)
 

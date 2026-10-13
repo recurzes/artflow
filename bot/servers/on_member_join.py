@@ -3,7 +3,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from bot.utils.embeds import base_embed
+from bot.shared.embeds import base_embed
 from shared.discord_layout import CHANNEL_RULES_AND_TOS, ROLE_UNVERIFIED
 
 logger = logging.getLogger(__name__)

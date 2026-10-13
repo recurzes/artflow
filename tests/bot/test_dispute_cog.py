@@ -3,8 +3,8 @@ Raising and resolving a dispute from Discord.
 """
 from unittest.mock import AsyncMock
 
-from bot.cogs.dispute import DisputeCog, DisputeResolveView, resolve_dispute_flow
-from bot.utils.api_client import APIError
+from bot.disputes.cog import DisputeCog, DisputeResolveView, resolve_dispute_flow
+from bot.shared.api_client import APIError
 from shared.discord_layout import ROLE_MODERATOR
 from tests.bot.fakes import (
     make_channel,

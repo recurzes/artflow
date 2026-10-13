@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import discord
 
-from bot.cogs.age_verification import AgeApproveButton, AgeGateModal, queue_for_review
+from bot.verification.age import AgeApproveButton, AgeGateModal, queue_for_review
 from shared.discord_layout import CHANNEL_VERIFICATION_QUEUE, ROLE_18_VERIFIED, ROLE_MODERATOR
 from tests.bot.fakes import make_channel, make_guild, make_interaction, make_member, reply_text
 

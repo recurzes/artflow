@@ -4,8 +4,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.utils.api_client import APIError
-from bot.utils.embeds import base_embed, error_embed, success_embed
+from bot.shared.api_client import APIError
+from bot.shared.embeds import base_embed, error_embed, success_embed
 from shared.discord_layout import ROLE_UNVERIFIED, ROLE_VERIFIED_USER
 
 logger = logging.getLogger(__name__)

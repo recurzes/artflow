@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from bot.utils.api_client import APIClient, APIError
+from bot.shared.api_client import APIClient, APIError
 from shared import storage
 from tests.conftest import make_discord_id
 

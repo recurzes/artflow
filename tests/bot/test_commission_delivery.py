@@ -6,15 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 import discord
 import pytest
 
-from bot.cogs import commission as cog
-from bot.cogs.commission import (
-    CommissionCog,
-    ReviewPromptView,
-    _attached,
-    announce_completed,
-    submit_review,
-)
-from bot.utils.api_client import APIError
+from bot.commissions import completion
+from bot.commissions.cog import CommissionCog
+from bot.commissions.completion import ReviewPromptView, announce_completed, submit_review
+from bot.commissions.formatting import attached
+from bot.shared.api_client import APIError
 from tests.bot.fakes import (
     make_channel,
     make_guild,
@@ -77,11 +73,11 @@ def _scene(user_id: int, status: str, **commission_fields):
 
 
 def test_attached_files_get_a_name_an_embed_can_reference():
-    file, name = _attached(b"x", "My Sketch (v2).PNG", "wip")
+    file, name = attached(b"x", "My Sketch (v2).PNG", "wip")
     assert name == "wip.png"
     assert file.filename == "wip.png"
-    assert _attached(b"x", "no-extension", "final")[1] == "final"
-    assert _attached(b"x", "weird.p n g", "final")[1] == "final"
+    assert attached(b"x", "no-extension", "final")[1] == "final"
+    assert attached(b"x", "weird.p n g", "final")[1] == "final"
 
 
 class TestWip:
@@ -181,7 +177,7 @@ class TestComplete:
     @pytest.fixture
     def download(self, monkeypatch):
         download = AsyncMock(return_value=b"png-bytes")
-        monkeypatch.setattr(cog, "download", download)
+        monkeypatch.setattr(completion, "download", download)
         return download
 
     async def test_completion_invites_a_review_and_showcases_the_piece(self, download):

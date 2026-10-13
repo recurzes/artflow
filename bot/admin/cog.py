@@ -4,10 +4,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.utils.api_client import APIError
-from bot.utils.embeds import base_embed, error_embed, success_embed
-from bot.utils.guild_setup import repair_staff_channels
-from bot.utils.permissions import is_admin
+from bot.servers.provisioning import repair_staff_channels
+from bot.shared.api_client import APIError
+from bot.shared.embeds import base_embed, error_embed, success_embed
+from bot.shared.permissions import is_admin
 
 
 # Discord ignores default_permissions on subcommands, so they are set on the group.

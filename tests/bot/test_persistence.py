@@ -7,7 +7,7 @@ import discord
 from bot.main import ArtflowBot
 
 # Views that are meant to expire: shown only to the user who asked, for a few minutes.
-SHORT_LIVED = {"bot.cogs.commission.ArtistPickView"}
+SHORT_LIVED = {"bot.commissions.opening.ArtistPickView"}
 
 
 def _name(cls: type) -> str:

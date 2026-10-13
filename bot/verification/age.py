@@ -7,10 +7,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from bot.utils.api_client import APIError
-from bot.utils.embeds import base_embed, error_embed, success_embed, warning_embed
-from bot.utils.permissions import is_staff
-from bot.utils.replies import reply_error, reply_success
+from bot.shared.api_client import APIError
+from bot.shared.embeds import base_embed, error_embed, success_embed, warning_embed
+from bot.shared.permissions import is_staff
+from bot.shared.replies import reply_error, reply_success
 from shared.discord_layout import CHANNEL_VERIFICATION_QUEUE, ROLE_18_VERIFIED
 
 logger = logging.getLogger(__name__)

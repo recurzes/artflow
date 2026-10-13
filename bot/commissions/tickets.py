@@ -6,7 +6,7 @@ from typing import Any
 
 import discord
 
-from bot.utils.api_client import APIError
+from bot.shared.api_client import APIError
 from shared.discord_layout import CATEGORY_CLOSED_TICKETS, CATEGORY_TICKETS, ROLE_MODERATOR
 
 logger = logging.getLogger(__name__)
