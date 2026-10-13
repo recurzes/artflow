@@ -96,6 +96,7 @@ class TestWip:
 
         api.post_wip.assert_awaited_once_with(
             "commission-uuid",
+            actor=ARTIST_ID,
             filename="My Sketch (v2).PNG",
             content=b"image-bytes",
             content_type="image/png",
@@ -122,12 +123,13 @@ class TestWip:
 
         api.post_wip.assert_not_awaited()
 
-    async def test_only_the_artist_can_post(self):
-        interaction, api, _, _, _ = _scene(CLIENT_ID, "WIP")
+    async def test_the_api_refusing_the_actor_is_relayed(self):
+        interaction, api, ticket, _, _ = _scene(CLIENT_ID, "WIP")
+        api.post_wip.side_effect = APIError(403, "Only the artist can post a WIP update")
 
         await self._wip(interaction, _attachment())
 
-        api.post_wip.assert_not_awaited()
+        ticket.send.assert_not_awaited()
         assert "Only the artist" in reply_text(interaction)
 
 
@@ -146,6 +148,7 @@ class TestDeliver:
 
         api.deliver.assert_awaited_once_with(
             "commission-uuid",
+            actor=ARTIST_ID,
             filename="final.png",
             content=b"image-bytes",
             content_type="image/png",
@@ -241,14 +244,16 @@ class TestComplete:
         ticket.send.assert_awaited_once()
         showcase.send.assert_not_awaited()
 
-    async def test_only_the_client_can_complete(self):
+    async def test_the_api_refusing_the_actor_is_relayed(self):
         interaction, api, ticket, _, _ = _scene(ARTIST_ID, "DELIVERED")
+        api.complete.side_effect = APIError(403, "Only the client can accept the delivery")
         cog_instance = CommissionCog(interaction.client)
 
         await cog_instance.complete_cmd.callback(cog_instance, interaction)
 
-        api.complete.assert_not_awaited()
+        api.complete.assert_awaited_once_with("commission-uuid", actor=ARTIST_ID)
         ticket.send.assert_not_awaited()
+        assert "Only the client can accept the delivery" in reply_text(interaction)
 
 
 class TestReview:
@@ -258,7 +263,7 @@ class TestReview:
         await submit_review(interaction, _commission("COMPLETED"), 5, "Lovely")
 
         api.review.assert_awaited_once_with(
-            "commission-uuid", reviewer_id="client-uuid", rating=5, body="Lovely"
+            "commission-uuid", actor=CLIENT_ID, rating=5, body="Lovely"
         )
         published = sent_embeds(reviews)[0]
         assert "Mika" in published.title
@@ -297,7 +302,7 @@ class TestReview:
         await cog_instance.review_cmd.callback(cog_instance, interaction, 3, "")
 
         api.review.assert_awaited_once_with(
-            "commission-uuid", reviewer_id="client-uuid", rating=3, body=None
+            "commission-uuid", actor=CLIENT_ID, rating=3, body=None
         )
         reviews.send.assert_awaited_once()
 

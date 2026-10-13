@@ -17,6 +17,7 @@ from shared.models.review import Review
 async def create_review(
         db: AsyncSession,
         commission_id: uuid.UUID,
+        actor: str,
         data: ReviewCreate
 ) -> Review:
     # The row lock makes "is there a review yet?" and the insert one step.
@@ -24,7 +25,7 @@ async def create_review(
     if comm.status != CommissionStatus.COMPLETED:
         raise InvalidState("A commission can be reviewed once it is completed")
 
-    if data.reviewer_id != comm.client_id:
+    if actor != comm.client_discord_user_id:
         raise Forbidden("Only the commissioning client can review this commission")
 
     if await repository.get_by_commission_id(db, commission_id) is not None:
@@ -34,7 +35,7 @@ async def create_review(
         db,
         Review(
             commission_id=commission_id,
-            reviewer_id=data.reviewer_id,
+            reviewer_id=comm.client_id,
             artist_id=comm.artist_id,
             rating=data.rating,
             body=data.body,

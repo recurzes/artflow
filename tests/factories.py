@@ -16,6 +16,46 @@ PDF = ("receipt.pdf", b"%PDF-1.4 " + b"\x00" * 64, "application/pdf")
 ZIP = ("layers.zip", b"PK\x03\x04" + b"\x00" * 64, "application/zip")
 
 
+ACTOR_HEADER = "X-Actor-Discord-Id"
+
+# Which party performs each commission action (the path's last segment).
+ACTION_ROLES = {
+    "intake": "client",
+    "quote": "artist",
+    "counter-offer": "client",
+    "accept-quote": "client",
+    "tos-accept": "client",
+    "receipt": "client",
+    "confirm-payment": "artist",
+    "wip-update": "artist",
+    "deliver": "artist",
+    "complete": "client",
+    "cancel": "client",
+    "review": "client",
+}
+
+
+def acting(discord_user_id: str) -> dict[str, str]:
+    """Request headers for an action performed by that Discord user."""
+    return {ACTOR_HEADER: discord_user_id}
+
+
+def as_client(commission: "Commission") -> dict[str, str]:
+    return acting(commission.test_client_discord_id)
+
+
+def as_artist(commission: "Commission") -> dict[str, str]:
+    return acting(commission.test_artist_discord_id)
+
+
+def as_party(commission: "Commission", action: str) -> dict[str, str]:
+    """Headers for whoever is allowed to perform `action` on this commission."""
+    role = ACTION_ROLES.get(action)
+    if role is None:
+        return {}
+    return as_client(commission) if role == "client" else as_artist(commission)
+
+
 async def make_server(db: AsyncSession, **overrides) -> Server:
     server = Server(
         discord_guild_id=overrides.pop("discord_guild_id", make_discord_id()),
@@ -60,6 +100,7 @@ async def make_artist(
     )
     db.add(artist)
     await db.commit()
+    artist.test_discord_id = user.discord_user_id  # for as_artist()
     return artist
 
 
@@ -84,4 +125,6 @@ async def make_commission(
     )
     db.add(commission)
     await db.commit()
+    commission.test_client_discord_id = client.discord_user_id
+    commission.test_artist_discord_id = artist.test_discord_id
     return commission

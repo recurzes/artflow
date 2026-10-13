@@ -2,7 +2,7 @@ import uuid
 
 from fastapi import APIRouter, status
 
-from api.dependencies import BotAuth, DBSession
+from api.dependencies import Actor, BotAuth, DBSession
 from api.reviews import service as review_service
 from api.reviews.schemas import ReviewCreate, ReviewRead
 
@@ -19,7 +19,8 @@ async def create_commission_review(
         commission_id: uuid.UUID,
         body: ReviewCreate,
         db: DBSession,
-        _auth: BotAuth
+        _auth: BotAuth,
+        actor: Actor
 ) -> ReviewRead:
-    review = await review_service.create_review(db, commission_id, body)
+    review = await review_service.create_review(db, commission_id, actor, body)
     return ReviewRead.model_validate(review)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Literal
+from typing import Any
 
 import discord
 
@@ -137,28 +137,17 @@ class TicketError(Exception):
     """A command cannot run here; the message is written for the user."""
 
 
-async def ticket_commission(
-        interaction: discord.Interaction,
-        *,
-        only: Literal["client", "artist"] | None = None,
-        action: str = "do this"
-) -> dict[str, Any]:
+async def ticket_commission(interaction: discord.Interaction) -> dict[str, Any]:
     """The commission that belongs to the channel an interaction happened in.
 
-    `only` restricts the action to one of the two parties.
+    This only locates the commission. Whether the member may act on it is the
+    API's decision, made when the action is sent with them as the actor.
     """
     if interaction.guild is None or not isinstance(interaction.channel, discord.TextChannel):
         raise TicketError("Use this inside a commission ticket channel")
     try:
-        commission = await interaction.client.api.get_commission_for_channel(
-            interaction.channel.id
-        )
+        return await interaction.client.api.get_commission_for_channel(interaction.channel.id)
     except APIError as exc:
         if exc.not_found:
             raise TicketError("This channel is not a commission ticket") from exc
         raise TicketError(exc.detail) from exc
-
-    user_id = str(interaction.user.id)
-    if only is not None and user_id != commission[f"{only}_discord_user_id"]:
-        raise TicketError(f"Only the {only} can {action}")
-    return commission

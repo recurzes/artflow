@@ -18,6 +18,10 @@ Json = dict[str, Any]
 # Uploads carry up to 25 MB and are forwarded to storage before the API answers.
 UPLOAD_TIMEOUT_SECONDS = 120.0
 
+# Which member an action is performed for; the API enforces who may do what.
+ACTOR_HEADER = "X-Actor-Discord-Id"
+ACTOR_IS_STAFF_HEADER = "X-Actor-Is-Staff"
+
 
 class APIError(Exception):
     """The API refused the request. `detail` is written for the Discord user."""
@@ -78,8 +82,15 @@ class APIClient:
             params: Any = None,
             files: Any = None,
             data: Json | None = None,
-            timeout: float | None = None
+            timeout: float | None = None,
+            actor: int | str | None = None,
+            as_staff: bool = False
     ) -> Any:
+        headers: dict[str, str] = {}
+        if actor is not None:
+            headers[ACTOR_HEADER] = str(actor)
+        if as_staff:
+            headers[ACTOR_IS_STAFF_HEADER] = "true"
         try:
             response = await self._http.request(
                 method,
@@ -88,6 +99,7 @@ class APIClient:
                 params=params,
                 files=files,
                 data=data,
+                headers=headers or None,
                 **({"timeout": timeout} if timeout is not None else {})
             )
         except httpx.HTTPError as exc:
@@ -103,6 +115,7 @@ class APIClient:
             content: bytes,
             content_type: str | None,
             *,
+            actor: int | str,
             data: Json | None = None
     ) -> Any:
         """Send a file to the API, which validates, stores and records it."""
@@ -111,7 +124,8 @@ class APIClient:
             path,
             files={"file": (filename, content, content_type or "application/octet-stream")},
             data=data,
-            timeout=UPLOAD_TIMEOUT_SECONDS
+            timeout=UPLOAD_TIMEOUT_SECONDS,
+            actor=actor
         )
 
     # ------------------------------------------------------------------ servers
@@ -278,15 +292,19 @@ class APIClient:
             json={"discord_ticket_channel_id": str(channel_id)},
         )
 
-    async def submit_intake(self, commission_id: str, notes: str) -> Json:
+    # Actions on a commission. `actor` is the Discord ID of the member who
+    # triggered it; the API decides whether that member may.
+
+    async def submit_intake(self, commission_id: str, notes: str, *, actor: int | str) -> Json:
         return await self._request(
-            "POST", f"/commissions/{commission_id}/intake", json={"notes": notes}
+            "POST", f"/commissions/{commission_id}/intake", json={"notes": notes}, actor=actor
         )
 
     async def quote(
             self,
             commission_id: str,
             *,
+            actor: int | str,
             price_php: str,
             revisions_allowed: int = 2
     ) -> Json:
@@ -298,42 +316,53 @@ class APIClient:
                 "currency_used": "PHP",
                 "revisions_allowed": revisions_allowed,
             },
+            actor=actor,
         )
 
-    async def counter_offer(self, commission_id: str, notes: str) -> Json:
+    async def counter_offer(self, commission_id: str, notes: str, *, actor: int | str) -> Json:
         return await self._request(
-            "POST", f"/commissions/{commission_id}/counter-offer", json={"notes": notes}
+            "POST",
+            f"/commissions/{commission_id}/counter-offer",
+            json={"notes": notes},
+            actor=actor,
         )
 
-    async def accept_quote(self, commission_id: str) -> Json:
-        return await self._request("POST", f"/commissions/{commission_id}/accept-quote")
+    async def accept_quote(self, commission_id: str, *, actor: int | str) -> Json:
+        return await self._request(
+            "POST", f"/commissions/{commission_id}/accept-quote", actor=actor
+        )
 
-    async def accept_tos(self, commission_id: str, tos_hash: str) -> Json:
+    async def accept_tos(self, commission_id: str, tos_hash: str, *, actor: int | str) -> Json:
         return await self._request(
             "POST",
             f"/commissions/{commission_id}/tos-accept",
             json={"tos_version_hash": tos_hash},
+            actor=actor,
         )
 
     async def upload_receipt(
             self,
             commission_id: str,
             *,
+            actor: int | str,
             filename: str,
             content: bytes,
             content_type: str | None
     ) -> Json:
         return await self._upload(
-            f"/commissions/{commission_id}/receipt", filename, content, content_type
+            f"/commissions/{commission_id}/receipt", filename, content, content_type, actor=actor
         )
 
-    async def confirm_payment(self, commission_id: str) -> Json:
-        return await self._request("POST", f"/commissions/{commission_id}/confirm-payment")
+    async def confirm_payment(self, commission_id: str, *, actor: int | str) -> Json:
+        return await self._request(
+            "POST", f"/commissions/{commission_id}/confirm-payment", actor=actor
+        )
 
     async def post_wip(
             self,
             commission_id: str,
             *,
+            actor: int | str,
             filename: str,
             content: bytes,
             content_type: str | None,
@@ -344,6 +373,7 @@ class APIClient:
             filename,
             content,
             content_type,
+            actor=actor,
             data={"note": note} if note else None
         )
 
@@ -351,32 +381,43 @@ class APIClient:
             self,
             commission_id: str,
             *,
+            actor: int | str,
             filename: str,
             content: bytes,
             content_type: str | None
     ) -> Json:
         return await self._upload(
-            f"/commissions/{commission_id}/deliver", filename, content, content_type
+            f"/commissions/{commission_id}/deliver", filename, content, content_type, actor=actor
         )
 
-    async def complete(self, commission_id: str) -> Json:
-        return await self._request("POST", f"/commissions/{commission_id}/complete")
+    async def complete(self, commission_id: str, *, actor: int | str) -> Json:
+        return await self._request("POST", f"/commissions/{commission_id}/complete", actor=actor)
 
-    async def cancel(self, commission_id: str) -> Json:
-        return await self._request("POST", f"/commissions/{commission_id}/cancel")
+    async def cancel(
+            self,
+            commission_id: str,
+            *,
+            actor: int | str,
+            as_staff: bool = False
+    ) -> Json:
+        """`as_staff`: the actor is a moderator of the server (only the bot can tell)."""
+        return await self._request(
+            "POST", f"/commissions/{commission_id}/cancel", actor=actor, as_staff=as_staff
+        )
 
     async def review(
             self,
             commission_id: str,
             *,
-            reviewer_id: str,
+            actor: int | str,
             rating: int,
             body: str | None = None
     ) -> Json:
         return await self._request(
             "POST",
             f"/commissions/{commission_id}/review",
-            json={"reviewer_id": reviewer_id, "rating": rating, "body": body, "is_public": True},
+            json={"rating": rating, "body": body, "is_public": True},
+            actor=actor,
         )
 
     # ------------------------------------------------------------------- sweeps

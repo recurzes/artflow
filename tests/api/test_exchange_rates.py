@@ -10,7 +10,7 @@ import pytest
 from api.commissions import exchange_rates
 from shared.config import settings
 from shared.models.commission import CommissionStatus
-from tests.factories import make_commission
+from tests.factories import as_artist, make_commission
 
 S = CommissionStatus
 
@@ -30,7 +30,9 @@ def rate_lookup(monkeypatch) -> AsyncMock:
 async def _quote(client, db, amount: str = "1500.00") -> dict:
     commission = await make_commission(db, status=S.INTAKE)
     response = await client.post(
-        f"/commissions/{commission.id}/quote", json={"quoted_price_php": amount}
+        f"/commissions/{commission.id}/quote",
+        headers=as_artist(commission),
+        json={"quoted_price_php": amount},
     )
     assert response.status_code == 200, response.text
     return response.json()
@@ -78,7 +80,7 @@ async def test_an_explicit_usd_price_is_kept(client, db, rate_lookup, monkeypatc
     commission = await make_commission(db, status=S.INTAKE)
 
     response = await client.post(
-        f"/commissions/{commission.id}/quote",
+        f"/commissions/{commission.id}/quote", headers=as_artist(commission),
         json={"quoted_price_php": "1500.00", "quoted_price_usd": "30.00"},
     )
 

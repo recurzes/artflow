@@ -8,7 +8,6 @@ from api.common import TimestampSchema
 class ReviewCreate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    reviewer_id: uuid.UUID
     rating: int = Field(ge=1, le=5)
     body: str | None = None
     is_public: bool = True

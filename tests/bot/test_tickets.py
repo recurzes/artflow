@@ -132,7 +132,7 @@ class TestCancelCommand:
 
         await self._cancel(interaction)
 
-        api.cancel.assert_awaited_once_with("commission-uuid")
+        api.cancel.assert_awaited_once_with("commission-uuid", actor=CLIENT_ID, as_staff=False)
         assert "Changed my mind" in sent_embeds(channel)[0].description
         assert channel.edit.await_args.kwargs["name"].startswith("closed-")
 
@@ -141,15 +141,20 @@ class TestCancelCommand:
 
         await self._cancel(interaction)
 
-        api.cancel.assert_awaited_once()
+        # only the bot can see Discord roles, so it vouches for moderators
+        api.cancel.assert_awaited_once_with("commission-uuid", actor=3003, as_staff=True)
 
-    async def test_a_bystander_cannot(self):
+    async def test_a_bystander_is_refused_by_the_api_and_nothing_is_closed(self):
         interaction, api, channel = self._scene(make_member(4004))
+        api.cancel.side_effect = APIError(
+            403, "Only the client, the artist or a moderator can cancel"
+        )
 
         await self._cancel(interaction)
 
-        api.cancel.assert_not_awaited()
+        api.cancel.assert_awaited_once_with("commission-uuid", actor=4004, as_staff=False)
         channel.edit.assert_not_awaited()
+        assert "Only the client, the artist or a moderator" in reply_text(interaction)
 
     async def test_refusal_after_payment_leaves_the_ticket_open(self):
         interaction, api, channel = self._scene(make_member(CLIENT_ID))

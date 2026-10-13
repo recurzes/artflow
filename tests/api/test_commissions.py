@@ -9,7 +9,18 @@ import pytest
 
 from shared.models.artist import ArtistStatus
 from shared.models.commission import CommissionStatus
-from tests.factories import PNG, make_artist, make_commission, make_server, make_user
+from tests.factories import (
+    ACTION_ROLES,
+    PNG,
+    acting,
+    as_artist,
+    as_client,
+    as_party,
+    make_artist,
+    make_commission,
+    make_server,
+    make_user,
+)
 
 S = CommissionStatus
 TOS_TEXT = "No refunds after the sketch is approved."
@@ -159,7 +170,11 @@ async def test_each_action_is_only_possible_from_its_own_status(
     artist = await make_artist(db, tos_text=TOS_TEXT)
     commission = await make_commission(db, artist=artist, status=status)
 
-    response = await client.post(f"/commissions/{commission.id}/{suffix}", **request)
+    response = await client.post(
+        f"/commissions/{commission.id}/{suffix}",
+        headers=as_party(commission, action),
+        **request,
+    )
 
     if status in allowed_from:
         assert response.status_code == 200, response.text
@@ -168,6 +183,62 @@ async def test_each_action_is_only_possible_from_its_own_status(
         assert response.status_code == 409, response.text
         assert (await client.get(f"/commissions/{commission.id}")).json()["status"] == status.value
         assert stored_files == []  # a refused action stores nothing
+
+
+ACTOR_ACTIONS = [action for action in ACTIONS if action in ACTION_ROLES and action != "cancel"]
+
+
+@pytest.mark.parametrize("action", ACTOR_ACTIONS)
+async def test_each_action_is_refused_for_the_other_party_and_for_strangers(
+        client, db, stored_files, action
+):
+    suffix, request, allowed_from, _ = ACTIONS[action]
+    status = sorted(allowed_from, key=lambda s: s.value)[0]
+    artist = await make_artist(db, tos_text=TOS_TEXT)
+    commission = await make_commission(db, artist=artist, status=status)
+    stranger = await make_user(db)
+    other_party = (
+        as_artist(commission) if ACTION_ROLES[action] == "client" else as_client(commission)
+    )
+
+    for headers in (other_party, acting(stranger.discord_user_id)):
+        response = await client.post(
+            f"/commissions/{commission.id}/{suffix}", headers=headers, **request
+        )
+        assert response.status_code == 403, response.text
+        assert response.json()["detail"].startswith(f"Only the {ACTION_ROLES[action]} can")
+
+    assert (await client.get(f"/commissions/{commission.id}")).json()["status"] == status.value
+    assert stored_files == []
+
+
+async def test_an_action_without_an_actor_is_rejected(client, db):
+    commission = await make_commission(db, status=S.QUOTED)
+
+    response = await client.post(f"/commissions/{commission.id}/accept-quote")
+
+    assert response.status_code == 422
+
+
+async def test_cancel_is_for_either_party_or_a_moderator(client, db):
+    stranger = await make_user(db)
+
+    for headers_for in (as_client, as_artist):
+        commission = await make_commission(db, status=S.QUOTED)
+        response = await client.post(
+            f"/commissions/{commission.id}/cancel", headers=headers_for(commission)
+        )
+        assert response.status_code == 200, response.text
+
+    commission = await make_commission(db, status=S.QUOTED)
+    refused = await client.post(
+        f"/commissions/{commission.id}/cancel", headers=acting(stranger.discord_user_id)
+    )
+    assert refused.status_code == 403
+
+    moderator = acting(stranger.discord_user_id) | {"X-Actor-Is-Staff": "true"}
+    allowed = await client.post(f"/commissions/{commission.id}/cancel", headers=moderator)
+    assert allowed.status_code == 200, allowed.text
 
 
 async def test_there_is_no_generic_status_endpoint(client, db):
@@ -183,7 +254,10 @@ async def test_there_is_no_generic_status_endpoint(client, db):
 async def test_disputed_commission_reports_that_it_is_frozen(client, db):
     commission = await make_commission(db, status=S.DISPUTED)
 
-    response = await client.post(f"/commissions/{commission.id}/complete")
+    response = await client.post(
+        f"/commissions/{commission.id}/complete",
+        headers=as_client(commission),
+    )
 
     assert response.status_code == 409
     assert "dispute" in response.json()["detail"]
@@ -195,7 +269,9 @@ async def test_counter_offer_clears_the_quote_and_keeps_the_notes(client, db):
     )
 
     response = await client.post(
-        f"/commissions/{commission.id}/counter-offer", json={"notes": "Can you do 1200?"}
+        f"/commissions/{commission.id}/counter-offer",
+        headers=as_client(commission),
+        json={"notes": "Can you do 1200?"},
     )
 
     data = response.json()
@@ -210,7 +286,9 @@ async def test_tos_accept_sets_the_payment_deadline(client, db):
     commission = await make_commission(db, artist=artist, status=S.TOS_PENDING)
 
     response = await client.post(
-        f"/commissions/{commission.id}/tos-accept", json={"tos_version_hash": TOS_HASH}
+        f"/commissions/{commission.id}/tos-accept",
+        headers=as_client(commission),
+        json={"tos_version_hash": TOS_HASH},
     )
 
     data = response.json()
@@ -225,7 +303,9 @@ async def test_tos_accept_rejects_a_stale_hash(client, db):
     commission = await make_commission(db, artist=artist, status=S.TOS_PENDING)
 
     response = await client.post(
-        f"/commissions/{commission.id}/tos-accept", json={"tos_version_hash": "0" * 64}
+        f"/commissions/{commission.id}/tos-accept",
+        headers=as_client(commission),
+        json={"tos_version_hash": "0" * 64},
     )
 
     assert response.status_code == 409
@@ -237,7 +317,9 @@ async def test_tos_accept_needs_the_artist_to_have_terms(client, db):
     commission = await make_commission(db, artist=artist, status=S.TOS_PENDING)
 
     response = await client.post(
-        f"/commissions/{commission.id}/tos-accept", json={"tos_version_hash": TOS_HASH}
+        f"/commissions/{commission.id}/tos-accept",
+        headers=as_client(commission),
+        json={"tos_version_hash": TOS_HASH},
     )
 
     assert response.status_code == 409
@@ -247,7 +329,7 @@ async def test_deliver_before_any_wip_explains_what_to_do(client, db):
     commission = await make_commission(db, status=S.IN_PROGRESS)
 
     response = await client.post(
-        f"/commissions/{commission.id}/deliver", files={"file": PNG}
+        f"/commissions/{commission.id}/deliver", headers=as_artist(commission), files={"file": PNG}
     )
 
     assert response.status_code == 409
@@ -257,7 +339,10 @@ async def test_deliver_before_any_wip_explains_what_to_do(client, db):
 async def test_complete_records_the_platform_fee(client, db):
     commission = await make_commission(db, status=S.DELIVERED, quoted_price_php=1500)
 
-    response = await client.post(f"/commissions/{commission.id}/complete")
+    response = await client.post(
+        f"/commissions/{commission.id}/complete",
+        headers=as_client(commission),
+    )
 
     data = response.json()
     assert data["status"] == "COMPLETED"
@@ -270,7 +355,10 @@ async def test_cancel_is_refused_once_a_receipt_is_uploaded(client, db):
         db, status=S.PAYMENT_PENDING, payment_receipt_key="receipts/abc.png"
     )
 
-    response = await client.post(f"/commissions/{commission.id}/cancel")
+    response = await client.post(
+        f"/commissions/{commission.id}/cancel",
+        headers=as_client(commission),
+    )
 
     assert response.status_code == 409
     assert "dispute" in response.json()["detail"]
@@ -281,7 +369,9 @@ async def test_cancelled_commission_frees_the_artists_slot(client, db):
     first, second = await make_user(db), await make_user(db)
     created = (await client.post("/commissions", json=_create_body(artist, first))).json()
 
-    await client.post(f"/commissions/{created['id']}/cancel")
+    await client.post(
+        f"/commissions/{created['id']}/cancel", headers=acting(first.discord_user_id)
+    )
 
     retry = await client.post("/commissions", json=_create_body(artist, second))
     assert retry.status_code == 201, retry.text

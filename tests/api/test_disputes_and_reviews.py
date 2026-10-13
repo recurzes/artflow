@@ -5,7 +5,7 @@ import pytest
 
 from shared.models.commission import CommissionStatus
 from tests.conftest import make_discord_id
-from tests.factories import make_artist, make_commission, make_user
+from tests.factories import acting, as_client, make_artist, make_commission, make_user
 
 S = CommissionStatus
 
@@ -174,7 +174,8 @@ class TestReviews:
 
         response = await client.post(
             f"/commissions/{commission.id}/review",
-            json={"reviewer_id": str(buyer.id), "rating": 4, "body": "Lovely work"},
+            headers=as_client(commission),
+            json={"rating": 4, "body": "Lovely work"},
         )
 
         assert response.status_code == 201, response.text
@@ -191,7 +192,8 @@ class TestReviews:
             )
             await client.post(
                 f"/commissions/{commission.id}/review",
-                json={"reviewer_id": str(buyer.id), "rating": rating},
+            headers=as_client(commission),
+                json={"rating": rating},
             )
 
         data = (await client.get(f"/artists/{artist.id}")).json()
@@ -203,7 +205,8 @@ class TestReviews:
 
         response = await client.post(
             f"/commissions/{commission.id}/review",
-            json={"reviewer_id": str(buyer.id), "rating": 5},
+            headers=as_client(commission),
+            json={"rating": 5},
         )
 
         assert response.status_code == 409
@@ -214,17 +217,26 @@ class TestReviews:
 
         response = await client.post(
             f"/commissions/{commission.id}/review",
-            json={"reviewer_id": str(someone_else.id), "rating": 1},
+            headers=acting(someone_else.discord_user_id),
+            json={"rating": 1},
         )
 
         assert response.status_code == 403
 
     async def test_second_review_is_a_conflict(self, client, db):
         _, buyer, commission = await _scene(db, S.COMPLETED)
-        body = {"reviewer_id": str(buyer.id), "rating": 5}
-        await client.post(f"/commissions/{commission.id}/review", json=body)
+        body = {"rating": 5}
+        await client.post(
+            f"/commissions/{commission.id}/review",
+            headers=as_client(commission),
+            json=body,
+        )
 
-        response = await client.post(f"/commissions/{commission.id}/review", json=body)
+        response = await client.post(
+            f"/commissions/{commission.id}/review",
+            headers=as_client(commission),
+            json=body,
+        )
 
         assert response.status_code == 409
         artist = (await client.get(f"/artists/{commission.artist_id}")).json()
@@ -235,7 +247,8 @@ class TestReviews:
 
         response = await client.post(
             f"/commissions/{commission.id}/review",
-            json={"reviewer_id": str(buyer.id), "rating": 6},
+            headers=as_client(commission),
+            json={"rating": 6},
         )
 
         assert response.status_code == 422
